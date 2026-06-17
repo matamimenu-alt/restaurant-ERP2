@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -12,7 +13,9 @@ import { errorHandler, notFound } from './middleware/errorHandler';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(helmet());
+const FRONTEND_DIST = path.join(__dirname, '../../../frontend/dist');
+
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(compression());
 app.use(morgan('dev'));
@@ -23,6 +26,12 @@ app.use('/api/v1', rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: 'Too
 app.use('/api/v1', routes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+
+// Serve React frontend
+app.use(express.static(FRONTEND_DIST));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+});
 
 app.use(notFound);
 app.use(errorHandler);
