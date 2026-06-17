@@ -64,9 +64,9 @@ export default function RestaurantsPage() {
                 </div>
                 <Badge variant={row.isActive ? 'success' : 'secondary'}>{row.isActive ? (lang === 'ar' ? 'نشط' : 'Active') : (lang === 'ar' ? 'غير نشط' : 'Inactive')}</Badge>
               </div>
-              {row.phone && <p className="text-sm text-muted-foreground">{row.phone as string}</p>}
-              {row.address && <p className="text-sm text-muted-foreground">{row.address as string}</p>}
-              {row.vatNumber && <p className="text-xs font-mono text-muted-foreground">{lang === 'ar' ? 'ضريبي: ' : 'VAT: '}{row.vatNumber as string}</p>}
+              {!!row.phone && <p className="text-sm text-muted-foreground">{row.phone as string}</p>}
+              {!!row.address && <p className="text-sm text-muted-foreground">{row.address as string}</p>}
+              {!!row.vatNumber && <p className="text-xs font-mono text-muted-foreground">{lang === 'ar' ? 'ضريبي: ' : 'VAT: '}{row.vatNumber as string}</p>}
               <div className="flex gap-1 justify-end pt-2 border-t">
                 <Button variant="ghost" size="icon" onClick={() => openEdit(row)}><Pencil className="h-4 w-4" /></Button>
                 <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(row.id as string)}><Trash2 className="h-4 w-4 text-destructive" /></Button>

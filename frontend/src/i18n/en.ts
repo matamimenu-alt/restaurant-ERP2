@@ -245,7 +245,7 @@ export const en = {
   accountName: 'Account Name',
   accountType: 'Account Type',
   debit: 'Debit',
-  credit: 'Credit',
+  creditAccount: 'Credit',
   balance: 'Balance',
   journalEntry: 'Journal Entry',
   entryDate: 'Entry Date',

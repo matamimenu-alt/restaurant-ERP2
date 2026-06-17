@@ -245,7 +245,7 @@ export const ar = {
   accountName: 'اسم الحساب',
   accountType: 'نوع الحساب',
   debit: 'مدين',
-  credit: 'دائن',
+  creditAccount: 'دائن',
   balance: 'الرصيد',
   journalEntry: 'قيد يومية',
   entryDate: 'تاريخ القيد',

@@ -49,10 +49,10 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
         <div className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">
-            {user?.nameAr?.charAt(0) || user?.nameEn?.charAt(0) || 'U'}
+            {user?.name?.charAt(0) || 'U'}
           </div>
           <div className="hidden sm:block">
-            <p className="font-medium text-sm leading-tight">{lang === 'ar' ? user?.nameAr : user?.nameEn}</p>
+            <p className="font-medium text-sm leading-tight">{user?.name}</p>
             <p className="text-xs text-muted-foreground">{user?.role}</p>
           </div>
           <ChevronDown className="h-3 w-3 text-muted-foreground" />

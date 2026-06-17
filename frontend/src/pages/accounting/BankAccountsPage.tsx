@@ -79,8 +79,8 @@ export default function BankAccountsPage() {
                 </div>
                 <Badge variant={row.isActive ? 'success' : 'secondary'}>{row.isActive ? (lang === 'ar' ? 'نشط' : 'Active') : (lang === 'ar' ? 'غير نشط' : 'Inactive')}</Badge>
               </div>
-              {row.accountNumber && <p className="font-mono text-sm text-muted-foreground">{row.accountNumber as string}</p>}
-              {row.iban && <p className="font-mono text-xs text-muted-foreground">{lang === 'ar' ? 'آيبان: ' : 'IBAN: '}{row.iban as string}</p>}
+              {!!row.accountNumber && <p className="font-mono text-sm text-muted-foreground">{row.accountNumber as string}</p>}
+              {!!row.iban && <p className="font-mono text-xs text-muted-foreground">{lang === 'ar' ? 'آيبان: ' : 'IBAN: '}{row.iban as string}</p>}
               <div className="pt-2 border-t">
                 <p className="text-xs text-muted-foreground">{lang === 'ar' ? 'الرصيد الحالي' : 'Current Balance'}</p>
                 <p className="text-xl font-bold text-blue-700"><CurrencyDisplay amount={row.currentBalance as number} /></p>
