@@ -3,7 +3,7 @@ builder = "nixpacks"
 buildCommand = "cd backend && npm install && npm run db:generate && npm run build"
 
 [deploy]
-startCommand = "cd backend && npm run start"
+startCommand = "node /app/backend/dist/index.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
