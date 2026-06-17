@@ -1,0 +1,34 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
+
+import routes from './routes';
+import { errorHandler, notFound } from './middleware/errorHandler';
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(helmet());
+app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+app.use(compression());
+app.use(morgan('dev'));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+app.use('/api/v1', rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: 'Too many requests' }));
+app.use('/api/v1', routes);
+
+app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+
+app.use(notFound);
+app.use(errorHandler);
+
+app.listen(PORT, () => {
+  console.log(`🚀 Mat'ami ERP Server running on port ${PORT}`);
+});
+
+export default app;

@@ -1,0 +1,38 @@
+import { Router } from 'express';
+import authRoutes from './auth';
+import restaurantRoutes from './restaurants';
+import branchRoutes from './branches';
+import userRoutes from './users';
+import supplierRoutes from './suppliers';
+import revenueRoutes from './revenue';
+import purchaseRoutes from './purchases';
+import inventoryRoutes from './inventory';
+import recipeRoutes from './recipes';
+import expenseRoutes from './expenses';
+import employeeRoutes from './employees';
+import payrollRoutes from './payroll';
+import accountingRoutes from './accounting';
+import reportRoutes from './reports';
+import dashboardRoutes from './dashboard';
+import alertRoutes from './alerts';
+
+const router = Router();
+
+router.use('/auth', authRoutes);
+router.use('/restaurants', restaurantRoutes);
+router.use('/branches', branchRoutes);
+router.use('/users', userRoutes);
+router.use('/suppliers', supplierRoutes);
+router.use('/revenue', revenueRoutes);
+router.use('/purchases', purchaseRoutes);
+router.use('/inventory', inventoryRoutes);
+router.use('/recipes', recipeRoutes);
+router.use('/expenses', expenseRoutes);
+router.use('/employees', employeeRoutes);
+router.use('/payroll', payrollRoutes);
+router.use('/accounting', accountingRoutes);
+router.use('/reports', reportRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/alerts', alertRoutes);
+
+export default router;

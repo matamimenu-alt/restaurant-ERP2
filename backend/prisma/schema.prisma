@@ -1,0 +1,745 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  MANAGER
+  ACCOUNTANT
+  VIEWER
+}
+
+enum RevenueSource {
+  CASH
+  CARD
+  BANK_TRANSFER
+  HUNGER_STATION
+  JAHEZ
+  TOYOU
+  NOON
+  CAREEM
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  BANK
+  CREDIT
+}
+
+enum PurchaseStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum ReturnType {
+  FULL
+  PARTIAL
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+  WASTE
+  PHYSICAL_COUNT
+}
+
+enum InventoryItemType {
+  FOOD
+  BEVERAGE
+  PACKAGING
+  CLEANING
+  CONSUMABLES
+}
+
+enum ExpenseType {
+  FIXED
+  VARIABLE
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+}
+
+enum PhysicalCountStatus {
+  DRAFT
+  COMPLETED
+}
+
+// ─── MULTI-TENANCY ────────────────────────────────────────────────────────────
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  nameAr    String
+  email     String   @unique
+  phone     String?
+  address   String?
+  logoUrl   String?
+  vatNumber String?
+  isActive  Boolean  @default(true)
+  plan      String   @default("standard")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  restaurants     Restaurant[]
+  suppliers       Supplier[]
+  inventoryItems  InventoryItem[]
+  inventoryCategories InventoryCategory[]
+  revenueEntries  RevenueEntry[]
+  purchaseInvoices PurchaseInvoice[]
+  purchaseReturns PurchaseReturn[]
+  expenses        Expense[]
+  expenseCategories ExpenseCategory[]
+  employees       Employee[]
+  payrollRuns     PayrollRun[]
+  accounts        Account[]
+  journalEntries  JournalEntry[]
+  bankAccounts    BankAccount[]
+  recipes         Recipe[]
+  auditLogs       AuditLog[]
+  alerts          Alert[]
+  stockMovements  StockMovement[]
+  physicalCounts  PhysicalCount[]
+
+  @@map("companies")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  email        String
+  password     String
+  nameAr       String
+  nameEn       String
+  role         UserRole @default(VIEWER)
+  isActive     Boolean  @default(true)
+  lastLogin    DateTime?
+  refreshToken String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  auditLogs    AuditLog[]
+  managedBranches Branch[] @relation("BranchManager")
+
+  @@unique([companyId, email])
+  @@map("users")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String
+  userId     String
+  action     String
+  entity     String
+  entityId   String?
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ─── RESTAURANT STRUCTURE ────────────────────────────────────────────────────
+
+model Restaurant {
+  id        String   @id @default(cuid())
+  companyId String
+  nameAr    String
+  nameEn    String
+  address   String?
+  phone     String?
+  vatNumber String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branches        Branch[]
+  revenueEntries  RevenueEntry[]
+  purchaseInvoices PurchaseInvoice[]
+  expenses        Expense[]
+  employees       Employee[]
+  payrollRuns     PayrollRun[]
+  recipes         Recipe[]
+  bankAccounts    BankAccount[]
+
+  @@map("restaurants")
+}
+
+model Branch {
+  id           String   @id @default(cuid())
+  restaurantId String
+  companyId    String
+  nameAr       String
+  nameEn       String
+  address      String?
+  phone        String?
+  managerId    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant       Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  manager          User?             @relation("BranchManager", fields: [managerId], references: [id])
+  revenueEntries   RevenueEntry[]
+  purchaseInvoices PurchaseInvoice[]
+  expenses         Expense[]
+  employees        Employee[]
+  inventoryLocations InventoryLocation[]
+  stockMovements   StockMovement[]
+  physicalCounts   PhysicalCount[]
+
+  @@map("branches")
+}
+
+// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
+
+model Supplier {
+  id           String   @id @default(cuid())
+  companyId    String
+  nameAr       String
+  nameEn       String
+  mobile       String?
+  email        String?
+  vatNumber    String?
+  paymentTerms Int      @default(30)
+  creditLimit  Decimal  @default(0) @db.Decimal(15, 2)
+  address      String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  purchaseInvoices PurchaseInvoice[]
+
+  @@map("suppliers")
+}
+
+// ─── INVENTORY ────────────────────────────────────────────────────────────────
+
+model InventoryCategory {
+  id        String            @id @default(cuid())
+  companyId String
+  nameAr    String
+  nameEn    String
+  type      InventoryItemType @default(FOOD)
+  createdAt DateTime          @default(now())
+
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items   InventoryItem[]
+
+  @@map("inventory_categories")
+}
+
+model InventoryItem {
+  id               String   @id @default(cuid())
+  companyId        String
+  categoryId       String?
+  code             String?
+  nameAr           String
+  nameEn           String
+  unit             String   @default("كجم")
+  minStock         Decimal  @default(0) @db.Decimal(15, 3)
+  maxStock         Decimal  @default(0) @db.Decimal(15, 3)
+  expiryAlertDays  Int      @default(7)
+  lastPurchasePrice Decimal @default(0) @db.Decimal(15, 2)
+  averageCost      Decimal  @default(0) @db.Decimal(15, 2)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category           InventoryCategory?  @relation(fields: [categoryId], references: [id])
+  locations          InventoryLocation[]
+  stockMovements     StockMovement[]
+  purchaseLines      PurchaseInvoiceLine[]
+  returnLines        PurchaseReturnLine[]
+  recipeLines        RecipeLine[]
+  physicalCountLines PhysicalCountLine[]
+
+  @@map("inventory_items")
+}
+
+model InventoryLocation {
+  id          String   @id @default(cuid())
+  branchId    String
+  itemId      String
+  quantity    Decimal  @default(0) @db.Decimal(15, 3)
+  averageCost Decimal  @default(0) @db.Decimal(15, 2)
+  lastUpdated DateTime @default(now())
+
+  branch Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  item   InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, itemId])
+  @@map("inventory_locations")
+}
+
+model StockMovement {
+  id          String            @id @default(cuid())
+  companyId   String
+  branchId    String
+  itemId      String
+  type        StockMovementType
+  quantity    Decimal           @db.Decimal(15, 3)
+  unitCost    Decimal           @default(0) @db.Decimal(15, 2)
+  totalCost   Decimal           @default(0) @db.Decimal(15, 2)
+  reference   String?
+  notes       String?
+  createdBy   String
+  createdAt   DateTime          @default(now())
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch  Branch        @relation(fields: [branchId], references: [id])
+  item    InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@map("stock_movements")
+}
+
+model PhysicalCount {
+  id          String              @id @default(cuid())
+  companyId   String
+  branchId    String
+  status      PhysicalCountStatus @default(DRAFT)
+  date        DateTime            @default(now())
+  notes       String?
+  createdBy   String
+  completedBy String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch  Branch             @relation(fields: [branchId], references: [id])
+  lines   PhysicalCountLine[]
+
+  @@map("physical_counts")
+}
+
+model PhysicalCountLine {
+  id         String   @id @default(cuid())
+  countId    String
+  itemId     String
+  systemQty  Decimal  @db.Decimal(15, 3)
+  countedQty Decimal  @db.Decimal(15, 3)
+  variance   Decimal  @db.Decimal(15, 3)
+  unitCost   Decimal  @default(0) @db.Decimal(15, 2)
+
+  count PhysicalCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  item  InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@map("physical_count_lines")
+}
+
+// ─── REVENUE ──────────────────────────────────────────────────────────────────
+
+model RevenueEntry {
+  id           String        @id @default(cuid())
+  companyId    String
+  restaurantId String
+  branchId     String?
+  date         DateTime
+  source       RevenueSource
+  amount       Decimal       @db.Decimal(15, 2)
+  notes        String?
+  createdBy    String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+
+  @@map("revenue_entries")
+}
+
+// ─── PURCHASING ───────────────────────────────────────────────────────────────
+
+model PurchaseInvoice {
+  id            String         @id @default(cuid())
+  companyId     String
+  supplierId    String
+  restaurantId  String
+  branchId      String?
+  invoiceNumber String
+  invoiceDate   DateTime
+  subtotal      Decimal        @db.Decimal(15, 2)
+  vatAmount     Decimal        @db.Decimal(15, 2)
+  total         Decimal        @db.Decimal(15, 2)
+  paymentMethod PaymentMethod  @default(CASH)
+  status        PurchaseStatus @default(POSTED)
+  notes         String?
+  createdBy     String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier   Supplier              @relation(fields: [supplierId], references: [id])
+  restaurant Restaurant            @relation(fields: [restaurantId], references: [id])
+  branch     Branch?               @relation(fields: [branchId], references: [id])
+  lines      PurchaseInvoiceLine[]
+  returns    PurchaseReturn[]
+
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceLine {
+  id        String  @id @default(cuid())
+  invoiceId String
+  itemId    String
+  quantity  Decimal @db.Decimal(15, 3)
+  unitPrice Decimal @db.Decimal(15, 2)
+  vatRate   Decimal @default(15) @db.Decimal(5, 2)
+  vatAmount Decimal @db.Decimal(15, 2)
+  total     Decimal @db.Decimal(15, 2)
+
+  invoice     PurchaseInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item        InventoryItem      @relation(fields: [itemId], references: [id])
+  returnLines PurchaseReturnLine[]
+
+  @@map("purchase_invoice_lines")
+}
+
+model PurchaseReturn {
+  id          String     @id @default(cuid())
+  companyId   String
+  invoiceId   String
+  returnDate  DateTime
+  reason      String?
+  returnType  ReturnType @default(PARTIAL)
+  subtotal    Decimal    @db.Decimal(15, 2)
+  vatAmount   Decimal    @db.Decimal(15, 2)
+  total       Decimal    @db.Decimal(15, 2)
+  status      String     @default("POSTED")
+  createdBy   String
+  createdAt   DateTime   @default(now())
+
+  company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoice PurchaseInvoice      @relation(fields: [invoiceId], references: [id])
+  lines   PurchaseReturnLine[]
+
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnLine {
+  id            String  @id @default(cuid())
+  returnId      String
+  invoiceLineId String
+  itemId        String
+  quantity      Decimal @db.Decimal(15, 3)
+  unitPrice     Decimal @db.Decimal(15, 2)
+  total         Decimal @db.Decimal(15, 2)
+
+  return      PurchaseReturn      @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  invoiceLine PurchaseInvoiceLine @relation(fields: [invoiceLineId], references: [id])
+  item        InventoryItem       @relation(fields: [itemId], references: [id])
+
+  @@map("purchase_return_lines")
+}
+
+// ─── EXPENSES ─────────────────────────────────────────────────────────────────
+
+model ExpenseCategory {
+  id        String      @id @default(cuid())
+  companyId String
+  nameAr    String
+  nameEn    String
+  type      ExpenseType @default(VARIABLE)
+  parentId  String?
+  createdAt DateTime    @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   ExpenseCategory?  @relation("SubCategories", fields: [parentId], references: [id])
+  children ExpenseCategory[] @relation("SubCategories")
+  expenses Expense[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id           String        @id @default(cuid())
+  companyId    String
+  restaurantId String
+  branchId     String?
+  categoryId   String
+  date         DateTime
+  amount       Decimal       @db.Decimal(15, 2)
+  paymentMethod PaymentMethod @default(CASH)
+  description  String?
+  receiptUrl   String?
+  createdBy    String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  company    Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant      @relation(fields: [restaurantId], references: [id])
+  branch     Branch?         @relation(fields: [branchId], references: [id])
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@map("expenses")
+}
+
+// ─── EMPLOYEES & PAYROLL ──────────────────────────────────────────────────────
+
+model Employee {
+  id                 String    @id @default(cuid())
+  companyId          String
+  restaurantId       String
+  branchId           String?
+  nameAr             String
+  nameEn             String
+  position           String
+  nationality        String?
+  basicSalary        Decimal   @db.Decimal(15, 2)
+  housingAllowance   Decimal   @default(0) @db.Decimal(15, 2)
+  transportAllowance Decimal   @default(0) @db.Decimal(15, 2)
+  iqamaCost          Decimal   @default(0) @db.Decimal(15, 2)
+  medicalInsurance   Decimal   @default(0) @db.Decimal(15, 2)
+  joiningDate        DateTime
+  iqamaExpiryDate    DateTime?
+  iqamaNumber        String?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant    Restaurant     @relation(fields: [restaurantId], references: [id])
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  payrollLines  PayrollLine[]
+  advances      SalaryAdvance[]
+
+  @@map("employees")
+}
+
+model PayrollRun {
+  id               String        @id @default(cuid())
+  companyId        String
+  restaurantId     String
+  month            Int
+  year             Int
+  status           PayrollStatus @default(DRAFT)
+  totalBasic       Decimal       @db.Decimal(15, 2)
+  totalAllowances  Decimal       @db.Decimal(15, 2)
+  totalDeductions  Decimal       @db.Decimal(15, 2)
+  totalNet         Decimal       @db.Decimal(15, 2)
+  processedBy      String
+  processedAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  lines      PayrollLine[]
+
+  @@unique([companyId, restaurantId, month, year])
+  @@map("payroll_runs")
+}
+
+model PayrollLine {
+  id                 String   @id @default(cuid())
+  payrollRunId       String
+  employeeId         String
+  basicSalary        Decimal  @db.Decimal(15, 2)
+  housingAllowance   Decimal  @db.Decimal(15, 2)
+  transportAllowance Decimal  @db.Decimal(15, 2)
+  otherAllowances    Decimal  @default(0) @db.Decimal(15, 2)
+  absenceDeduction   Decimal  @default(0) @db.Decimal(15, 2)
+  lateDeduction      Decimal  @default(0) @db.Decimal(15, 2)
+  advanceDeduction   Decimal  @default(0) @db.Decimal(15, 2)
+  penaltyDeduction   Decimal  @default(0) @db.Decimal(15, 2)
+  totalEarnings      Decimal  @db.Decimal(15, 2)
+  totalDeductions    Decimal  @db.Decimal(15, 2)
+  netSalary          Decimal  @db.Decimal(15, 2)
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+
+  @@map("payroll_lines")
+}
+
+model SalaryAdvance {
+  id         String   @id @default(cuid())
+  companyId  String
+  employeeId String
+  amount     Decimal  @db.Decimal(15, 2)
+  date       DateTime
+  notes      String?
+  isPaid     Boolean  @default(false)
+  createdBy  String
+  createdAt  DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("salary_advances")
+}
+
+// ─── RECIPES ──────────────────────────────────────────────────────────────────
+
+model Recipe {
+  id             String   @id @default(cuid())
+  companyId      String
+  restaurantId   String
+  nameAr         String
+  nameEn         String
+  category       String?
+  servings       Decimal  @default(1) @db.Decimal(10, 2)
+  localPrice     Decimal  @default(0) @db.Decimal(15, 2)
+  deliveryPrice  Decimal  @default(0) @db.Decimal(15, 2)
+  targetMargin   Decimal  @default(70) @db.Decimal(5, 2)
+  foodCost       Decimal  @default(0) @db.Decimal(15, 2)
+  costPerPortion Decimal  @default(0) @db.Decimal(15, 2)
+  grossMargin    Decimal  @default(0) @db.Decimal(5, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  lines      RecipeLine[]
+
+  @@map("recipes")
+}
+
+model RecipeLine {
+  id       String  @id @default(cuid())
+  recipeId String
+  itemId   String
+  quantity Decimal @db.Decimal(15, 3)
+  unit     String
+  notes    String?
+
+  recipe Recipe        @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  item   InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@map("recipe_lines")
+}
+
+// ─── ACCOUNTING ───────────────────────────────────────────────────────────────
+
+model Account {
+  id        String      @id @default(cuid())
+  companyId String
+  code      String
+  nameAr    String
+  nameEn    String
+  type      AccountType
+  subtype   String?
+  parentId  String?
+  isActive  Boolean     @default(true)
+  balance   Decimal     @default(0) @db.Decimal(15, 2)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent       Account?      @relation("SubAccounts", fields: [parentId], references: [id])
+  children     Account[]     @relation("SubAccounts")
+  journalLines JournalLine[]
+
+  @@unique([companyId, code])
+  @@map("accounts")
+}
+
+model JournalEntry {
+  id          String        @id @default(cuid())
+  companyId   String
+  entryDate   DateTime
+  reference   String?
+  description String
+  status      JournalStatus @default(DRAFT)
+  createdBy   String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines   JournalLine[]
+
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id          String  @id @default(cuid())
+  entryId     String
+  accountId   String
+  debit       Decimal @default(0) @db.Decimal(15, 2)
+  credit      Decimal @default(0) @db.Decimal(15, 2)
+  description String?
+
+  entry   JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id])
+
+  @@map("journal_lines")
+}
+
+model BankAccount {
+  id             String   @id @default(cuid())
+  companyId      String
+  restaurantId   String?
+  bankName       String
+  accountNumber  String
+  iban           String?
+  currency       String   @default("SAR")
+  currentBalance Decimal  @default(0) @db.Decimal(15, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
+
+  @@map("bank_accounts")
+}
+
+// ─── ALERTS ───────────────────────────────────────────────────────────────────
+
+model Alert {
+  id        String   @id @default(cuid())
+  companyId String
+  type      String
+  title     String
+  titleAr   String
+  message   String
+  messageAr String
+  severity  String   @default("warning")
+  entityId  String?
+  entityType String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("alerts")
+}
