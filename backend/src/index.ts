@@ -11,6 +11,7 @@ import routes from './routes';
 import { errorHandler, notFound } from './middleware/errorHandler';
 
 const app = express();
+app.set('trust proxy', 1); // Railway runs behind a reverse proxy
 const PORT = process.env.PORT || 3001;
 
 const FRONTEND_DIST = path.join(__dirname, '../../../frontend/dist');
