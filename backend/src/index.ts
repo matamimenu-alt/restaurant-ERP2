@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 3001;
 
 const FRONTEND_DIST = path.join(__dirname, '../../../frontend/dist');
 
+// Trust proxy - required for rate limiting behind a reverse proxy (Railway)
+app.set('trust proxy', 1);
+
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(compression());
@@ -41,3 +44,4 @@ app.listen(PORT, () => {
 });
 
 export default app;
+
