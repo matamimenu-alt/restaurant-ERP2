@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
 import PageHeader from '@/components/shared/PageHeader'
@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Trash2, Receipt, Info } from 'lucide-react'
+import { Plus, Trash2, Receipt, Info, Upload, Download } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 
@@ -30,6 +30,8 @@ export default function PurchasesPage() {
   const [tab, setTab] = useState('invoices')
   const [priceHistory, setPriceHistory] = useState<Record<string, unknown> | null>(null)
   const [selectedSupplier, setSelectedSupplier] = useState('')
+  const [importResult, setImportResult] = useState<{ createdInvoices: number; createdReturns: number; errors: string[] } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ['purchase-invoices'],
@@ -64,6 +66,25 @@ export default function PurchasesPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase-invoices'] }); setOpen(false); reset(); toast({ title: lang === 'ar' ? 'تم الحفظ' : 'Saved', variant: 'success' }) },
   })
 
+  const importMutation = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData(); fd.append('file', file)
+      return api.post('/api/v1/import/purchases', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data.data)
+    },
+    onSuccess: (data) => {
+      setImportResult(data)
+      qc.invalidateQueries({ queryKey: ['purchase-invoices'] })
+      qc.invalidateQueries({ queryKey: ['purchase-returns'] })
+      toast({ title: lang === 'ar' ? `تم الاستيراد: ${data.createdInvoices} فاتورة، ${data.createdReturns} استرداد` : `Imported: ${data.createdInvoices} invoices, ${data.createdReturns} returns`, variant: 'success' })
+    },
+    onError: () => toast({ title: lang === 'ar' ? 'فشل الاستيراد' : 'Import failed', variant: 'destructive' }),
+  })
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (file) importMutation.mutate(file)
+    e.target.value = ''
+  }
+
   const invoices = invoicesData?.data || []
   const returns = returnsData?.data || []
 
@@ -72,12 +93,35 @@ export default function PurchasesPage() {
       <PageHeader
         title={lang === 'ar' ? 'المشتريات' : 'Purchasing'}
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <ExportButtons data={invoices} filename="purchases" />
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => window.open('/api/v1/import/templates/purchase', '_blank')}>
+              <Download className="h-4 w-4" />{lang === 'ar' ? 'نموذج الاستيراد' : 'Template'}
+            </Button>
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending}>
+              <Upload className="h-4 w-4" />{importMutation.isPending ? (lang === 'ar' ? 'جاري...' : 'Importing...') : (lang === 'ar' ? 'استيراد Excel' : 'Import Excel')}
+            </Button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
             <Button onClick={() => { reset(); setOpen(true) }} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'فاتورة جديدة' : 'New Invoice'}</Button>
           </div>
         }
       />
+
+      {importResult && (
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="pt-4 space-y-1">
+            <p className="text-sm font-medium text-green-800">
+              {lang === 'ar' ? `تم الاستيراد: ${importResult.createdInvoices} فاتورة، ${importResult.createdReturns} استرداد` : `Imported: ${importResult.createdInvoices} invoices, ${importResult.createdReturns} returns`}
+            </p>
+            {importResult.errors.length > 0 && (
+              <details className="text-xs text-amber-700 mt-2">
+                <summary className="cursor-pointer">{lang === 'ar' ? `${importResult.errors.length} تحذير` : `${importResult.errors.length} warnings`}</summary>
+                <ul className="mt-1 space-y-0.5 list-disc list-inside">{importResult.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
+              </details>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex gap-2 border-b pb-0">
         <button onClick={() => setTab('invoices')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === 'invoices' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'}`}>
