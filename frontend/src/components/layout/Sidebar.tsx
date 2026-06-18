@@ -75,6 +75,7 @@ const navItems: NavItem[] = [
       { labelAr: 'تقرير المخزون', labelEn: 'Inventory Report', path: '/reports/inventory', icon: Package },
       { labelAr: 'تقرير الرواتب', labelEn: 'Payroll Report', path: '/reports/payroll', icon: Users },
       { labelAr: 'تقرير تكلفة الطعام', labelEn: 'Food Cost Report', path: '/reports/food-cost', icon: ChefHat },
+      { labelAr: 'تقرير ضريبة القيمة المضافة', labelEn: 'VAT Report', path: '/reports/vat', icon: Calculator },
     ]
   },
   {

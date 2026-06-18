@@ -26,6 +26,7 @@ import ExpenseReportPage from '@/pages/reports/ExpenseReportPage'
 import InventoryReportPage from '@/pages/reports/InventoryReportPage'
 import PayrollReportPage from '@/pages/reports/PayrollReportPage'
 import FoodCostReportPage from '@/pages/reports/FoodCostReportPage'
+import VatReportPage from '@/pages/reports/VatReportPage'
 import CompanyPage from '@/pages/setup/CompanyPage'
 import RestaurantsPage from '@/pages/setup/RestaurantsPage'
 import BranchesPage from '@/pages/setup/BranchesPage'
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="reports/inventory" element={<InventoryReportPage />} />
         <Route path="reports/payroll" element={<PayrollReportPage />} />
         <Route path="reports/food-cost" element={<FoodCostReportPage />} />
+        <Route path="reports/vat" element={<VatReportPage />} />
         <Route path="setup/company" element={<CompanyPage />} />
         <Route path="setup/restaurants" element={<RestaurantsPage />} />
         <Route path="setup/branches" element={<BranchesPage />} />

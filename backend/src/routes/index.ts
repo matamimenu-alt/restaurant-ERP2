@@ -15,6 +15,7 @@ import accountingRoutes from './accounting';
 import reportRoutes from './reports';
 import dashboardRoutes from './dashboard';
 import alertRoutes from './alerts';
+import importRoutes from './imports';
 
 const router = Router();
 
@@ -34,5 +35,6 @@ router.use('/accounting', accountingRoutes);
 router.use('/reports', reportRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/alerts', alertRoutes);
+router.use('/import', importRoutes);
 
 export default router;

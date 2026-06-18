@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
 import PageHeader from '@/components/shared/PageHeader'
@@ -10,12 +10,12 @@ import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Users, AlertTriangle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Users, AlertTriangle, Upload, Download, CheckCircle, AlertCircle } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, Controller } from 'react-hook-form'
 
@@ -25,12 +25,27 @@ export default function EmployeesPage() {
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Record<string, unknown> | null>(null)
+  const [importResult, setImportResult] = useState<{created: number; updated: number; errors: string[]; total: number} | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const { data, isLoading } = useQuery({ queryKey: ['employees'], queryFn: () => api.get('/api/v1/employees?limit=200').then(r => r.data) })
   const { data: restaurants } = useQuery({ queryKey: ['restaurants'], queryFn: () => api.get('/api/v1/restaurants?limit=100').then(r => r.data.data) })
   const { data: iqamaAlerts } = useQuery({ queryKey: ['iqama-alerts'], queryFn: () => api.get('/api/v1/employees/iqama-alerts').then(r => r.data.data) })
 
   const { register, handleSubmit, control, reset } = useForm()
+
+  const importMutation = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData(); fd.append('file', file)
+      return api.post('/api/v1/import/employees', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data.data)
+    },
+    onSuccess: (result) => {
+      setImportResult(result)
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      toast({ title: lang === 'ar' ? `تم استيراد ${result.created} موظف` : `Imported ${result.created} employees`, variant: 'success' })
+    },
+    onError: () => toast({ title: lang === 'ar' ? 'فشل الاستيراد' : 'Import failed', variant: 'destructive' }),
+  })
 
   const saveMutation = useMutation({
     mutationFn: (d: Record<string, unknown>) => editing
@@ -59,12 +74,32 @@ export default function EmployeesPage() {
       <PageHeader
         title={lang === 'ar' ? 'الموظفون' : 'Employees'}
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => api.get('/api/v1/import/templates/employee', { responseType: 'blob' }).then(r => { const url = URL.createObjectURL(r.data); const a = document.createElement('a'); a.href = url; a.download = 'employee_template.xlsx'; a.click() })} className="gap-2">
+              <Download className="h-4 w-4" />{lang === 'ar' ? 'تنزيل نموذج' : 'Template'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={importMutation.isPending} className="gap-2">
+              <Upload className="h-4 w-4" />{lang === 'ar' ? 'استيراد Excel' : 'Import Excel'}
+            </Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { if (e.target.files?.[0]) { importMutation.mutate(e.target.files[0]); e.target.value = '' } }} />
             <ExportButtons data={employees} filename="employees" />
             <Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة موظف' : 'Add Employee'}</Button>
           </div>
         }
       />
+
+      {importResult && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              <span className="font-medium text-sm">{lang === 'ar' ? `تم: استيراد ${importResult.created}، تحديث ${importResult.updated} من ${importResult.total}` : `Created ${importResult.created}, updated ${importResult.updated} of ${importResult.total}`}</span>
+              <Button variant="ghost" size="sm" className="ms-auto h-6 text-xs" onClick={() => setImportResult(null)}>✕</Button>
+            </div>
+            {importResult.errors.slice(0, 5).map((e, i) => <p key={i} className="text-xs text-red-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" />{e}</p>)}
+          </CardContent>
+        </Card>
+      )}
 
       {iqamaCount > 0 && (
         <Card className="border-red-200 bg-red-50">
@@ -133,10 +168,12 @@ export default function EmployeesPage() {
           <DialogHeader><DialogTitle>{editing ? (lang === 'ar' ? 'تعديل موظف' : 'Edit Employee') : (lang === 'ar' ? 'إضافة موظف' : 'Add Employee')}</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit(d => saveMutation.mutate(d as Record<string, unknown>))} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'رقم الموظف' : 'Employee ID'}</Label><Input {...register('employeeId')} /></div>
+              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'الجنسية' : 'Nationality'}</Label><Input {...register('nationality')} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'الاسم بالعربي' : 'Name (Arabic)'}</Label><Input {...register('nameAr', { required: true })} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'الاسم بالإنجليزي' : 'Name (English)'}</Label><Input {...register('nameEn', { required: true })} /></div>
-              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'المنصب' : 'Position'}</Label><Input {...register('position', { required: true })} /></div>
-              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'الجنسية' : 'Nationality'}</Label><Input {...register('nationality')} /></div>
+              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'المسمى الوظيفي' : 'Position'}</Label><Input {...register('position', { required: true })} /></div>
+              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'القسم' : 'Department'}</Label><Input {...register('department')} /></div>
               <div className="space-y-1.5">
                 <Label>{lang === 'ar' ? 'المطعم' : 'Restaurant'}</Label>
                 <Controller name="restaurantId" control={control} rules={{ required: true }} render={({ field }) => (
@@ -150,6 +187,7 @@ export default function EmployeesPage() {
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'الراتب الأساسي' : 'Basic Salary'}</Label><Input type="number" step="0.01" {...register('basicSalary', { required: true, valueAsNumber: true })} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'بدل السكن' : 'Housing Allowance'}</Label><Input type="number" step="0.01" defaultValue={0} {...register('housingAllowance', { valueAsNumber: true })} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'بدل النقل' : 'Transport Allowance'}</Label><Input type="number" step="0.01" defaultValue={0} {...register('transportAllowance', { valueAsNumber: true })} /></div>
+              <div className="space-y-1.5"><Label>{lang === 'ar' ? 'بدلات أخرى' : 'Other Allowances'}</Label><Input type="number" step="0.01" defaultValue={0} {...register('otherAllowances', { valueAsNumber: true })} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'تكلفة الإقامة' : 'Iqama Cost'}</Label><Input type="number" step="0.01" defaultValue={0} {...register('iqamaCost', { valueAsNumber: true })} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'التأمين الطبي' : 'Medical Insurance'}</Label><Input type="number" step="0.01" defaultValue={0} {...register('medicalInsurance', { valueAsNumber: true })} /></div>
               <div className="space-y-1.5"><Label>{lang === 'ar' ? 'رقم الإقامة' : 'Iqama Number'}</Label><Input {...register('iqamaNumber')} /></div>
