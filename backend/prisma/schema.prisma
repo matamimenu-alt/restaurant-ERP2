@@ -129,6 +129,7 @@ model Company {
   alerts          Alert[]
   stockMovements  StockMovement[]
   physicalCounts  PhysicalCount[]
+  importHistory ImportHistory[]
 
   @@map("companies")
 }
@@ -756,4 +757,22 @@ model Alert {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("alerts")
+}
+
+model ImportHistory {
+  id          String   @id @default(cuid())
+  companyId   String
+  importType  String
+  fileName    String
+  totalRows   Int      @default(0)
+  successRows Int      @default(0)
+  failedRows  Int      @default(0)
+  status      String   @default("COMPLETED")
+  errorLog    Json?
+  createdBy   String
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("import_history")
 }

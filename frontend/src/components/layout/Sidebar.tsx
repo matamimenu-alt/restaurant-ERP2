@@ -5,7 +5,7 @@ import {
   LayoutDashboard, TrendingUp, DollarSign, ShoppingCart, Package,
   UtensilsCrossed, Calculator, Receipt, Users, Building2, ChevronDown,
   Store, GitBranch, Bell, BookOpen, Banknote, BarChart3, FileText,
-  Warehouse, ClipboardList, ChefHat, Settings, X
+  Warehouse, ClipboardList, ChefHat, Settings, X, FileInput
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -78,6 +78,7 @@ const navItems: NavItem[] = [
       { labelAr: 'تقرير ضريبة القيمة المضافة', labelEn: 'VAT Report', path: '/reports/vat', icon: Calculator },
     ]
   },
+  { labelAr: 'استيراد البيانات', labelEn: 'Data Import', path: '/imports', icon: FileInput },
   {
     labelAr: 'الإعدادات', labelEn: 'Settings', icon: Settings,
     children: [
