@@ -183,7 +183,9 @@ model Restaurant {
   nameEn    String
   address   String?
   phone     String?
+  email     String?
   vatNumber String?
+  crNumber  String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -368,17 +370,21 @@ model PhysicalCountLine {
 // ─── REVENUE ──────────────────────────────────────────────────────────────────
 
 model RevenueEntry {
-  id           String        @id @default(cuid())
-  companyId    String
-  restaurantId String
-  branchId     String?
-  date         DateTime
-  source       RevenueSource
-  amount       Decimal       @db.Decimal(15, 2)
-  notes        String?
-  createdBy    String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  companyId       String
+  restaurantId    String
+  branchId        String?
+  date            DateTime
+  source          RevenueSource
+  amount          Decimal       @db.Decimal(15, 2)
+  isVatInclusive  Boolean       @default(true)
+  vatRate         Decimal       @default(15) @db.Decimal(5, 2)
+  vatAmount       Decimal       @default(0) @db.Decimal(15, 2)
+  amountExVat     Decimal       @default(0) @db.Decimal(15, 2)
+  notes           String?
+  createdBy       String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   restaurant Restaurant @relation(fields: [restaurantId], references: [id])
@@ -400,6 +406,7 @@ model PurchaseInvoice {
   subtotal      Decimal        @db.Decimal(15, 2)
   vatAmount     Decimal        @db.Decimal(15, 2)
   total         Decimal        @db.Decimal(15, 2)
+  invoiceType   String         @default("TAX")
   paymentMethod PaymentMethod  @default(CASH)
   status        PurchaseStatus @default(POSTED)
   notes         String?
@@ -491,19 +498,22 @@ model ExpenseCategory {
 }
 
 model Expense {
-  id           String        @id @default(cuid())
-  companyId    String
-  restaurantId String
-  branchId     String?
-  categoryId   String
-  date         DateTime
-  amount       Decimal       @db.Decimal(15, 2)
+  id            String        @id @default(cuid())
+  companyId     String
+  restaurantId  String
+  branchId      String?
+  categoryId    String
+  date          DateTime
+  amount        Decimal       @db.Decimal(15, 2)
+  isVatable     Boolean       @default(false)
+  vatRate       Decimal       @default(15) @db.Decimal(5, 2)
+  vatAmount     Decimal       @default(0) @db.Decimal(15, 2)
   paymentMethod PaymentMethod @default(CASH)
-  description  String?
-  receiptUrl   String?
-  createdBy    String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  description   String?
+  receiptUrl    String?
+  createdBy     String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   company    Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   restaurant Restaurant      @relation(fields: [restaurantId], references: [id])
@@ -520,18 +530,22 @@ model Employee {
   companyId          String
   restaurantId       String
   branchId           String?
+  employeeId         String?
   nameAr             String
   nameEn             String
   position           String
+  department         String?
   nationality        String?
   basicSalary        Decimal   @db.Decimal(15, 2)
   housingAllowance   Decimal   @default(0) @db.Decimal(15, 2)
   transportAllowance Decimal   @default(0) @db.Decimal(15, 2)
+  otherAllowances    Decimal   @default(0) @db.Decimal(15, 2)
   iqamaCost          Decimal   @default(0) @db.Decimal(15, 2)
   medicalInsurance   Decimal   @default(0) @db.Decimal(15, 2)
   joiningDate        DateTime
   iqamaExpiryDate    DateTime?
   iqamaNumber        String?
+  status             String    @default("ACTIVE")
   isActive           Boolean   @default(true)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

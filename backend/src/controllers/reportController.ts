@@ -172,6 +172,208 @@ export const getPayrollReport = async (req: AuthRequest, res: Response) => {
   } catch { sendError(res, 'Failed to generate payroll report', 500); }
 };
 
+export const getVatReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user!.companyId;
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const month = req.query.month ? parseInt(req.query.month as string) : undefined;
+    const restaurantId = req.query.restaurantId as string | undefined;
+
+    const months = month ? [month] : Array.from({ length: 12 }, (_, i) => i + 1);
+
+    const monthlyData = await Promise.all(months.map(async (m) => {
+      const from = new Date(year, m - 1, 1);
+      const to = new Date(year, m, 0, 23, 59, 59, 999);
+      const baseWhere = { companyId, ...(restaurantId ? { restaurantId } : {}) };
+
+      const [revenueAgg, expenseAgg, purchaseAgg] = await Promise.all([
+        prisma.revenueEntry.aggregate({
+          where: { ...baseWhere, date: { gte: from, lte: to } },
+          _sum: { amount: true, vatAmount: true, amountExVat: true },
+        }),
+        prisma.expense.aggregate({
+          where: { ...baseWhere, isVatable: true, date: { gte: from, lte: to } },
+          _sum: { amount: true, vatAmount: true },
+        }),
+        prisma.purchaseInvoice.aggregate({
+          where: { ...baseWhere, invoiceType: 'TAX', status: 'POSTED', invoiceDate: { gte: from, lte: to } },
+          _sum: { vatAmount: true, subtotal: true, total: true },
+        }),
+      ]);
+
+      const vatCollected = Number(revenueAgg._sum.vatAmount || 0);
+      const vatPaidExpenses = Number(expenseAgg._sum.vatAmount || 0);
+      const vatPaidPurchases = Number(purchaseAgg._sum.vatAmount || 0);
+      const vatPaid = vatPaidExpenses + vatPaidPurchases;
+      const netVatPayable = vatCollected - vatPaid;
+
+      return {
+        month: m, year,
+        revenue: { total: Number(revenueAgg._sum.amount || 0), exVat: Number(revenueAgg._sum.amountExVat || 0), vatCollected },
+        expenses: { total: Number(expenseAgg._sum.amount || 0), vatPaid: vatPaidExpenses },
+        purchases: { total: Number(purchaseAgg._sum.total || 0), vatPaid: vatPaidPurchases },
+        vatCollected, vatPaid, netVatPayable,
+      };
+    }));
+
+    const totals = monthlyData.reduce((acc, m) => ({
+      vatCollected: acc.vatCollected + m.vatCollected,
+      vatPaid: acc.vatPaid + m.vatPaid,
+      netVatPayable: acc.netVatPayable + m.netVatPayable,
+      totalRevenue: acc.totalRevenue + m.revenue.total,
+      totalRevExVat: acc.totalRevExVat + m.revenue.exVat,
+    }), { vatCollected: 0, vatPaid: 0, netVatPayable: 0, totalRevenue: 0, totalRevExVat: 0 });
+
+    sendSuccess(res, { year, monthly: monthlyData, totals });
+  } catch (err) { console.error(err); sendError(res, 'Failed to generate VAT report', 500); }
+};
+
+export const getVatDeclaration = async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user!.companyId;
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const quarter = req.query.quarter ? parseInt(req.query.quarter as string) : undefined;
+    const restaurantId = req.query.restaurantId as string | undefined;
+
+    // Determine months for the period
+    let months: number[];
+    if (quarter) {
+      months = [(quarter - 1) * 3 + 1, (quarter - 1) * 3 + 2, (quarter - 1) * 3 + 3];
+    } else {
+      months = Array.from({ length: 12 }, (_, i) => i + 1);
+    }
+
+    const from = new Date(year, months[0] - 1, 1);
+    const to = new Date(year, months[months.length - 1], 0, 23, 59, 59, 999);
+    const baseWhere = { companyId, ...(restaurantId ? { restaurantId } : {}) };
+
+    const [company, revenueAgg, purchaseAgg, expenseAgg] = await Promise.all([
+      prisma.company.findUnique({ where: { id: companyId }, select: { name: true, nameAr: true, vatNumber: true } }),
+      prisma.revenueEntry.aggregate({
+        where: { ...baseWhere, date: { gte: from, lte: to } },
+        _sum: { amount: true, vatAmount: true, amountExVat: true },
+      }),
+      prisma.purchaseInvoice.aggregate({
+        where: { ...baseWhere, invoiceType: 'TAX', status: 'POSTED', invoiceDate: { gte: from, lte: to } },
+        _sum: { subtotal: true, vatAmount: true, total: true },
+      }),
+      prisma.expense.aggregate({
+        where: { ...baseWhere, isVatable: true, date: { gte: from, lte: to } },
+        _sum: { amount: true, vatAmount: true },
+      }),
+    ]);
+
+    const vatOnSales = Number(revenueAgg._sum.vatAmount || 0);
+    const vatOnPurchases = Number(purchaseAgg._sum.vatAmount || 0);
+    const vatOnExpenses = Number(expenseAgg._sum.vatAmount || 0);
+    const totalInputVat = vatOnPurchases + vatOnExpenses;
+    const netVatPayable = vatOnSales - totalInputVat;
+
+    sendSuccess(res, {
+      declaration: {
+        taxPayer: { name: company?.name, nameAr: company?.nameAr, vatNumber: company?.vatNumber },
+        period: { year, quarter: quarter || 'Annual', from, to },
+        outputVat: {
+          standardRatedSales: Number(revenueAgg._sum.amountExVat || 0),
+          vatOnSales,
+        },
+        inputVat: {
+          standardRatedPurchases: Number(purchaseAgg._sum.subtotal || 0),
+          vatOnPurchases,
+          vatableExpenses: Number(expenseAgg._sum.amount || 0),
+          vatOnExpenses,
+          totalInputVat,
+        },
+        netVatPayable,
+        status: netVatPayable > 0 ? 'PAYABLE' : 'REFUNDABLE',
+      },
+    });
+  } catch (err) { console.error(err); sendError(res, 'Failed to generate VAT declaration', 500); }
+};
+
+export const getRevenueByRestaurant = async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user!.companyId;
+    const { from, to } = getDateRange(req);
+    const dateFilter = from || to ? { date: { gte: from, lte: to } } : {};
+
+    const byRestaurant = await prisma.revenueEntry.groupBy({
+      by: ['restaurantId'],
+      where: { companyId, ...dateFilter },
+      _sum: { amount: true, vatAmount: true },
+      orderBy: { _sum: { amount: 'desc' } },
+    });
+
+    const restaurants = await prisma.restaurant.findMany({ where: { companyId }, select: { id: true, nameAr: true, nameEn: true } });
+    const restMap = new Map(restaurants.map(r => [r.id, r]));
+
+    const total = byRestaurant.reduce((s, r) => s + Number(r._sum.amount || 0), 0);
+    sendSuccess(res, {
+      total,
+      byRestaurant: byRestaurant.map(r => ({
+        restaurantId: r.restaurantId,
+        restaurant: restMap.get(r.restaurantId),
+        amount: Number(r._sum.amount || 0),
+        vatAmount: Number(r._sum.vatAmount || 0),
+        percentage: total > 0 ? ((Number(r._sum.amount || 0) / total) * 100).toFixed(1) : '0',
+      })),
+    });
+  } catch { sendError(res, 'Failed to generate report', 500); }
+};
+
+export const getRevenueByBranch = async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user!.companyId;
+    const { from, to } = getDateRange(req);
+    const dateFilter = from || to ? { date: { gte: from, lte: to } } : {};
+
+    const byBranch = await prisma.revenueEntry.groupBy({
+      by: ['branchId', 'restaurantId'],
+      where: { companyId, branchId: { not: null }, ...dateFilter },
+      _sum: { amount: true },
+      orderBy: { _sum: { amount: 'desc' } },
+    });
+
+    const branches = await prisma.branch.findMany({ where: { companyId }, include: { restaurant: { select: { nameAr: true } } } });
+    const branchMap = new Map(branches.map(b => [b.id, b]));
+
+    const total = byBranch.reduce((s, b) => s + Number(b._sum.amount || 0), 0);
+    sendSuccess(res, {
+      total,
+      byBranch: byBranch.map(b => ({
+        branchId: b.branchId,
+        branch: b.branchId ? branchMap.get(b.branchId) : null,
+        amount: Number(b._sum.amount || 0),
+        percentage: total > 0 ? ((Number(b._sum.amount || 0) / total) * 100).toFixed(1) : '0',
+      })),
+    });
+  } catch { sendError(res, 'Failed to generate report', 500); }
+};
+
+export const getRevenueByMonth = async (req: AuthRequest, res: Response) => {
+  try {
+    const companyId = req.user!.companyId;
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const restaurantId = req.query.restaurantId as string | undefined;
+    const baseWhere = { companyId, ...(restaurantId ? { restaurantId } : {}) };
+
+    const monthly = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => i + 1).map(async (m) => {
+        const from = new Date(year, m - 1, 1);
+        const to = new Date(year, m, 0, 23, 59, 59, 999);
+        const agg = await prisma.revenueEntry.aggregate({
+          where: { ...baseWhere, date: { gte: from, lte: to } },
+          _sum: { amount: true, vatAmount: true },
+        });
+        return { month: m, year, amount: Number(agg._sum.amount || 0), vatAmount: Number(agg._sum.vatAmount || 0) };
+      })
+    );
+
+    const total = monthly.reduce((s, m) => s + m.amount, 0);
+    sendSuccess(res, { year, monthly, total });
+  } catch { sendError(res, 'Failed to generate report', 500); }
+};
+
 export const getAuditLog = async (req: AuthRequest, res: Response) => {
   try {
     const { from, to } = getDateRange(req);

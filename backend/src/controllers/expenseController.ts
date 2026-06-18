@@ -72,6 +72,26 @@ export const createExpenseCategory = async (req: AuthRequest, res: Response) => 
   } catch { sendError(res, 'Failed to create category', 500); }
 };
 
+export const updateExpenseCategory = async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.expenseCategory.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Category not found', 404);
+    const category = await prisma.expenseCategory.update({ where: { id: req.params.id }, data: req.body });
+    sendSuccess(res, category);
+  } catch { sendError(res, 'Failed to update category', 500); }
+};
+
+export const deleteExpenseCategory = async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.expenseCategory.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Category not found', 404);
+    const hasExpenses = await prisma.expense.count({ where: { categoryId: req.params.id } });
+    if (hasExpenses > 0) return sendError(res, 'Cannot delete category with existing expenses', 400);
+    await prisma.expenseCategory.delete({ where: { id: req.params.id } });
+    sendSuccess(res, null, 'Category deleted');
+  } catch { sendError(res, 'Failed to delete category', 500); }
+};
+
 export const getExpenseSummary = async (req: AuthRequest, res: Response) => {
   try {
     const { from, to } = getDateRange(req);
