@@ -1,7 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useAuth } from '@/hooks/useAuth'
 import AppLayout from '@/components/layout/AppLayout'
-import LoginPage from '@/pages/auth/LoginPage'
 import DashboardPage from '@/pages/dashboard/DashboardPage'
 import AnalyticsPage from '@/pages/analytics/AnalyticsPage'
 import RevenuePage from '@/pages/revenue/RevenuePage'
@@ -34,25 +32,13 @@ import BranchesPage from '@/pages/setup/BranchesPage'
 import UsersPage from '@/pages/users/UsersPage'
 import AlertsPage from '@/pages/alerts/AlertsPage'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth()
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  return <>{children}</>
-}
-
 export default function App() {
-  const { isAuthenticated } = useAuth()
-
   return (
     <Routes>
-      <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route
         path="/"
-        element={
-          <ProtectedRoute>
-            <AppLayout />
-          </ProtectedRoute>
-        }
+        element={<AppLayout />}
       >
         <Route index element={<DashboardPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
