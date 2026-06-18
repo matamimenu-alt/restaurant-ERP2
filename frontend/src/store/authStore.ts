@@ -18,19 +18,25 @@ interface AuthState {
   logout: () => void
 }
 
+const DEFAULT_USER: User = {
+  id: 'default',
+  name: 'Admin',
+  email: 'admin@matami.sa',
+  role: 'COMPANY_ADMIN',
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      user: null,
-      token: null,
-      isAuthenticated: false,
+      user: DEFAULT_USER,
+      token: 'no-auth',
+      isAuthenticated: true,
       login: (user, token) => {
         localStorage.setItem('token', token)
         set({ user, token, isAuthenticated: true })
       },
       logout: () => {
-        localStorage.removeItem('token')
-        set({ user: null, token: null, isAuthenticated: false })
+        set({ user: DEFAULT_USER, token: 'no-auth', isAuthenticated: true })
       },
     }),
     {
