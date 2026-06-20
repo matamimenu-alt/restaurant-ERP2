@@ -344,6 +344,7 @@ export const getPurchaseLines = async (req: AuthRequest, res: Response) => {
     const { page, limit, skip } = getPagination(req);
     const invoiceWhere: Prisma.PurchaseInvoiceWhereInput = { companyId: req.user!.companyId };
     if (req.query.supplierId) invoiceWhere.supplierId = req.query.supplierId as string;
+    if (req.query.restaurantId) invoiceWhere.restaurantId = req.query.restaurantId as string;
     if (req.query.paymentMethod) invoiceWhere.paymentMethod = req.query.paymentMethod as 'CASH' | 'BANK' | 'CREDIT';
     if (req.query.invoiceType) invoiceWhere.invoiceType = req.query.invoiceType as string;
     const from = req.query.from ? new Date(req.query.from as string) : undefined;
