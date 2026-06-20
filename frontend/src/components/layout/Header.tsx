@@ -1,10 +1,11 @@
-import { Bell, Menu, Globe, LogOut, User, ChevronDown } from 'lucide-react'
+import { Bell, Menu, Globe, LogOut, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useLang } from '@/hooks/useLang'
 import { useAuth } from '@/hooks/useAuth'
 import { useQuery } from '@tanstack/react-query'
 import api from '@/lib/api'
 import { Link } from 'react-router-dom'
+import RestaurantSwitcher from './RestaurantSwitcher'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -31,6 +32,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
       <div className="flex-1" />
 
       <div className="flex items-center gap-2">
+        <RestaurantSwitcher />
         <Button variant="ghost" size="sm" onClick={toggleLang} className="gap-2">
           <Globe className="h-4 w-4" />
           <span className="hidden sm:inline">{lang === 'ar' ? 'English' : 'عربي'}</span>
