@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ExportButtons from '@/components/shared/ExportButtons'
-import { Plus, Trash2, Receipt, Info, Upload, CheckCircle, XCircle, AlertCircle, ArrowRightLeft, BarChart3, Download } from 'lucide-react'
+import { Plus, Trash2, Pencil, Receipt, Info, Upload, CheckCircle, XCircle, AlertCircle, ArrowRightLeft, BarChart3, Download } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 import { downloadPurchasesTemplate } from '@/lib/excelTemplates'
@@ -285,6 +285,32 @@ export default function PurchasesPage() {
       toast({ title: lang === 'ar' ? `تم تحديد ${ids.length} فاتورة` : `Selected ${ids.length} invoices` })
     } catch {
       toast({ title: lang === 'ar' ? 'خطأ في تحميل الفواتير' : 'Failed to load invoices', variant: 'destructive' })
+    }
+  }
+
+  const openEditInvoice = async (invoiceId: string) => {
+    try {
+      const r = await api.get(`/api/v1/purchases/invoices/${invoiceId}`)
+      const inv = r.data.data
+      reset({
+        supplierId: inv.supplierId,
+        restaurantId: inv.restaurantId,
+        invoiceNumber: inv.invoiceNumber,
+        invoiceDate: new Date(inv.invoiceDate).toISOString().split('T')[0],
+        invoiceType: inv.invoiceType,
+        paymentMethod: inv.paymentMethod,
+        notes: inv.notes || '',
+        lines: inv.lines.map((l: { itemId: string; quantity: number; unitPrice: number; vatRate: number }) => ({
+          itemId: l.itemId,
+          quantity: Number(l.quantity),
+          unitPrice: Number(l.unitPrice),
+          vatRate: Number(l.vatRate),
+        })),
+      })
+      setEditingInvoiceId(invoiceId)
+      setOpen(true)
+    } catch {
+      toast({ title: lang === 'ar' ? 'فشل تحميل الفاتورة' : 'Failed to load invoice', variant: 'destructive' })
     }
   }
 
@@ -619,7 +645,7 @@ export default function PurchasesPage() {
                     <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الصافي' : 'Net'}</TableHead>
                     <TableHead className="text-xs font-semibold uppercase text-gray-500 text-green-600">{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
                     <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
-                    <TableHead className="w-10"></TableHead>
+                    <TableHead className="w-20"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -665,10 +691,16 @@ export default function PurchasesPage() {
                         <TableCell className="text-sm font-bold">SAR {Number(line.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell onClick={e => e.stopPropagation()}>
                           {isFirst && (
-                            <Button variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => { if (confirm(lang === 'ar' ? 'حذف هذه الفاتورة؟' : 'Delete this invoice?')) deleteMutation.mutate(invoiceId) }}>
-                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7"
+                                onClick={() => openEditInvoice(invoiceId)}>
+                                <Pencil className="h-3.5 w-3.5 text-blue-500" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7"
+                                onClick={() => { if (confirm(lang === 'ar' ? 'حذف هذه الفاتورة؟' : 'Delete this invoice?')) deleteMutation.mutate(invoiceId) }}>
+                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                              </Button>
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>

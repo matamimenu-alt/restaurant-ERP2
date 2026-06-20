@@ -107,12 +107,52 @@ export const createPurchaseInvoice = async (req: AuthRequest, res: Response) => 
 
 export const updatePurchaseInvoice = async (req: AuthRequest, res: Response) => {
   try {
-    const existing = await prisma.purchaseInvoice.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    const existing = await prisma.purchaseInvoice.findFirst({
+      where: { id: req.params.id, companyId: req.user!.companyId },
+    });
     if (!existing) return sendError(res, 'Invoice not found', 404);
-    if (existing.status === 'POSTED') return sendError(res, 'Cannot edit posted invoice', 400);
-    const invoice = await prisma.purchaseInvoice.update({ where: { id: req.params.id }, data: req.body });
+
+    const { supplierId, restaurantId, branchId, invoiceNumber, invoiceDate, invoiceType, paymentMethod, notes, subtotal, vatAmount, total, lines } = req.body;
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const updated = await tx.purchaseInvoice.update({
+        where: { id: req.params.id },
+        data: {
+          supplierId, restaurantId, branchId,
+          invoiceNumber, invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+          invoiceType, paymentMethod, notes,
+          subtotal: subtotal !== undefined ? subtotal : existing.subtotal,
+          vatAmount: vatAmount !== undefined ? vatAmount : existing.vatAmount,
+          total: total !== undefined ? total : existing.total,
+        },
+      });
+
+      if (Array.isArray(lines)) {
+        await tx.purchaseInvoiceLine.deleteMany({ where: { invoiceId: req.params.id } });
+        await tx.purchaseInvoiceLine.createMany({
+          data: lines.map((l: { itemId: string; quantity: number; unitPrice: number; vatRate?: number; vatAmount: number; total: number }) => ({
+            invoiceId: req.params.id,
+            itemId: l.itemId,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            vatRate: l.vatRate ?? 15,
+            vatAmount: l.vatAmount,
+            total: l.total,
+          })),
+        });
+        for (const l of lines as { itemId: string; unitPrice: number }[]) {
+          await tx.inventoryItem.update({
+            where: { id: l.itemId },
+            data: { lastPurchasePrice: l.unitPrice },
+          });
+        }
+      }
+
+      return updated;
+    });
+
     sendSuccess(res, invoice);
-  } catch { sendError(res, 'Failed to update invoice', 500); }
+  } catch (err) { console.error(err); sendError(res, 'Failed to update invoice', 500); }
 };
 
 export const createPurchaseReturn = async (req: AuthRequest, res: Response) => {
