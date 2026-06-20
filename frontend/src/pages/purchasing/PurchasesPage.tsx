@@ -14,9 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ExportButtons from '@/components/shared/ExportButtons'
-import { Plus, Trash2, Receipt, Info, Upload, CheckCircle, XCircle, AlertCircle, ArrowRightLeft, BarChart3 } from 'lucide-react'
+import { Plus, Trash2, Receipt, Info, Upload, CheckCircle, XCircle, AlertCircle, ArrowRightLeft, BarChart3, Download } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
+import { downloadPurchasesTemplate } from '@/lib/excelTemplates'
 
 type PurchaseLine = {
   id: string
@@ -110,26 +111,30 @@ function parseImportFile(file: File): Promise<ImportRow[]> {
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]
         const parsed: ImportRow[] = rows.map(row => {
-          const n = (k: string) => Number(row[k] ?? 0) || 0
-          const s = (k: string) => String(row[k] ?? '')
-          const payRaw = s('Payment').toLowerCase() || s('Payment Method').toLowerCase()
-          const paymentMethod = payRaw.includes('credit') ? 'CREDIT' : payRaw.includes('bank') || payRaw.includes('card') ? 'BANK' : 'CASH'
-          const typeRaw = s('Invoice Type').toLowerCase()
-          const invoiceType = typeRaw.includes('tax') ? 'TAX' : 'SIMPLE'
+          const n = (...keys: string[]) => { for (const k of keys) { const v = Number(row[k]); if (!isNaN(v)) return v } return 0 }
+          const s = (...keys: string[]) => { for (const k of keys) { const v = row[k]; if (v !== undefined && v !== null && String(v).trim()) return String(v).trim() } return '' }
+          // Skip note/comment rows
+          const firstVal = String(Object.values(row)[0] || '')
+          if (firstVal.startsWith('---') || firstVal.startsWith('Invoice Type') || firstVal.startsWith('Payment')) return null
+          const payRaw = s('Payment', 'Payment Method', 'طريقة الدفع').toLowerCase()
+          const paymentMethod = payRaw.includes('credit') || payRaw === 'آجل' ? 'CREDIT'
+            : payRaw.includes('bank') || payRaw.includes('card') || payRaw === 'بطاقة' ? 'BANK' : 'CASH'
+          const typeRaw = s('Invoice Type', 'نوع الفاتورة').toLowerCase()
+          const invoiceType = typeRaw.includes('tax') || typeRaw === 'tax' ? 'TAX' : 'SIMPLE'
           return {
-            date: parseExcelDate(row['Date'] || row['التاريخ']),
-            supplierName: s('Supplier') || s('المورد'),
-            invoiceNumber: s('Invoice ID') || s('Invoice Number') || s('رقم الفاتورة'),
+            date: parseExcelDate(row['Date'] || row['تاريخ الفاتورة'] || row['التاريخ']),
+            supplierName: s('Supplier', 'المورد'),
+            invoiceNumber: s('Invoice ID', 'Invoice Number', 'رقم الفاتورة'),
             invoiceType,
             paymentMethod,
-            product: s('Product') || s('المنتج'),
-            category: s('Category') || s('الفئة'),
-            unit: s('Unit') || s('الوحدة') || 'unit',
-            quantity: n('Quantity') || n('الكمية'),
-            unitPrice: n('Unit Price (SAR)') || n('Unit Price') || n('سعر الوحدة'),
-            vatAmount: n('VAT (SAR)') || n('VAT') || n('الضريبة'),
+            product: s('Product', 'المنتج'),
+            category: s('Category', 'الفئة'),
+            unit: s('Unit', 'الوحدة') || 'unit',
+            quantity: n('Quantity', 'الكمية'),
+            unitPrice: n('Unit Price (SAR)', 'Unit Price', 'سعر الوحدة'),
+            vatAmount: n('VAT (SAR)', 'VAT', 'الضريبة', 'مبلغ الضريبة'),
           }
-        }).filter(r => r.date && r.product)
+        }).filter((r): r is ImportRow => r !== null && !!r.date && !!r.product)
         resolve(parsed)
       } catch (err) { reject(err) }
     }
@@ -786,9 +791,17 @@ export default function PurchasesPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-700">
-              <p className="font-semibold mb-1">{lang === 'ar' ? 'أعمدة Excel المطلوبة:' : 'Required Excel columns:'}</p>
-              <p className="text-blue-600">Date, Supplier, Invoice ID, Invoice Type (Tax/Simple), Payment (Cash/Bank/Credit), Product, Category, Unit, Quantity, Unit Price (SAR), VAT (SAR)</p>
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start justify-between gap-3">
+              <div className="text-xs text-blue-700">
+                <p className="font-semibold mb-1">{lang === 'ar' ? 'أعمدة النموذج:' : 'Template columns:'}</p>
+                <p className="text-blue-600 font-mono text-[11px] leading-5">
+                  Date | Supplier | Invoice ID | Invoice Type | Payment | Product | Category | Unit | Quantity | Unit Price (SAR) | VAT (SAR)
+                </p>
+                <p className="text-blue-500 mt-1">{lang === 'ar' ? 'نفس Invoice ID = نفس الفاتورة (أصناف متعددة)' : 'Same Invoice ID = same invoice (multiple lines)'}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={downloadPurchasesTemplate} className="shrink-0 gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-100 text-xs">
+                <Download className="h-3.5 w-3.5" />{lang === 'ar' ? 'تحميل النموذج' : 'Download Template'}
+              </Button>
             </div>
             {Array.isArray(restaurants) && restaurants.length > 0 && (
               <div className="space-y-1">

@@ -14,9 +14,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Pencil, Trash2, BarChart3, Calendar, Settings, Upload, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, BarChart3, Calendar, Settings, Upload, CheckCircle, XCircle, AlertCircle, Download } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, Controller } from 'react-hook-form'
+import { downloadSalesTemplate } from '@/lib/excelTemplates'
 
 type DailyRecord = {
   id: string
@@ -77,35 +78,35 @@ function parseImportFile(file: File): Promise<ImportRow[]> {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const data = e.target?.result
-        const wb = XLSX.read(data, { type: 'array' })
+        const wb = XLSX.read(e.target?.result, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]
         const parsed: ImportRow[] = rows.map(row => {
-          const n = (k: string) => Number(row[k] || row[k.toLowerCase()] || 0) || 0
-          const cash = n('Cash (SAR)') || n('Cash') || n('نقد') || 0
-          const card = n('Card (SAR)') || n('Card') || n('بطاقة') || 0
-          const hs = n('HungerStation') || n('Hunger Station') || n('هنقر ستيشن') || 0
-          const jh = n('Jahez') || n('جاهز') || 0
-          const nf = n('Noon Food') || n('NoonFood') || n('نون فود') || 0
-          const tl = n('Talabat') || n('طلبات') || 0
-          const a5 = n('App 5') || n('App5') || n('تطبيق 5') || 0
-          const a6 = n('App 6') || n('App6') || n('تطبيق 6') || 0
-          const ob = n('Opening Balance (SAR)') || n('Opening Balance') || n('رصيد الافتتاح') || 0
-          const ce = n('Cash Expenses (SAR)') || n('Cash Expenses') || n('مصاريف نقدية') || 0
-          const cb = n('Closing Balance (SAR)') || n('Closing Balance') || n('رصيد الختام') || 0
+          const n = (...keys: string[]) => { for (const k of keys) { const v = Number(row[k]); if (!isNaN(v) && v !== 0) return v; const v2 = Number(row[k.toLowerCase()]); if (!isNaN(v2) && v2 !== 0) return v2; } return 0 }
+          // Support exact template columns + Arabic fallbacks
+          const cash = n('Cash (SAR)', 'Cash', 'نقد', 'مبيعات نقدية')
+          const card = n('Card (SAR)', 'Card', 'بطاقة', 'مبيعات بطاقة')
+          const hs   = n('HungerStation', 'Hunger Station', 'هنقر ستيشن')
+          const jh   = n('Jahez', 'جاهز')
+          const nf   = n('Noon Food', 'NoonFood', 'نون فود')
+          const tl   = n('Talabat', 'طلبات')
+          const a5   = n('App 5', 'App5', 'تطبيق 5')
+          const a6   = n('App 6', 'App6', 'تطبيق 6')
+          const ob   = n('Opening Balance (SAR)', 'Opening Balance', 'رصيد الافتتاح')
+          const ce   = n('Cash Expenses (SAR)', 'Cash Expenses', 'مصاريف نقدية')
+          const cb   = n('Closing Balance (SAR)', 'Closing Balance', 'رصيد الختام')
           const vatModeRaw = String(row['VAT Mode'] || row['وضع الضريبة'] || 'inclusive').toLowerCase()
           const vatMode = vatModeRaw === 'exclusive' ? 'EXCLUSIVE' : 'INCLUSIVE'
           const notes = String(row['Notes'] || row['ملاحظات'] || '')
           const dateKey = row['Date'] || row['التاريخ'] || row['date']
           const date = parseExcelDate(dateKey)
+          // Skip computed-only rows (Notes rows that start with ---)
+          if (String(dateKey || '').startsWith('---')) return null
           const apps = hs + jh + nf + tl + a5 + a6
           return { date, vatMode, cashSales: cash, cardSales: card, hungerStation: hs, jahez: jh, noonFood: nf, talabat: tl, app5: a5, app6: a6, openingBalance: ob, cashExpenses: ce, closingBalance: cb, notes, total: cash + card + apps, _raw: row }
-        }).filter(r => r.date && r.date.length === 10)
+        }).filter(r => r !== null && r.date && r.date.length === 10) as ImportRow[]
         resolve(parsed)
-      } catch (err) {
-        reject(err)
-      }
+      } catch (err) { reject(err) }
     }
     reader.onerror = reject
     reader.readAsArrayBuffer(file)
@@ -466,10 +467,17 @@ export default function RevenuePage() {
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Template info */}
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-700">
-              <p className="font-semibold mb-1">{lang === 'ar' ? 'أعمدة Excel المطلوبة:' : 'Required Excel columns:'}</p>
-              <p className="text-blue-600">Date, Cash (SAR), Card (SAR), HungerStation, Jahez, Noon Food, Talabat, App 5, App 6, Opening Balance (SAR), Cash Expenses (SAR), Closing Balance (SAR), Notes, VAT Mode</p>
+            {/* Template download */}
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start justify-between gap-3">
+              <div className="text-xs text-blue-700">
+                <p className="font-semibold mb-1">{lang === 'ar' ? 'أعمدة النموذج:' : 'Template columns:'}</p>
+                <p className="text-blue-600 font-mono text-[11px] leading-5">
+                  Date | VAT Mode | Cash (SAR) | Card (SAR) | HungerStation | Jahez | Noon Food | Talabat | App 5 | App 6 | Opening Balance (SAR) | Cash Expenses (SAR) | Closing Balance (SAR) | Notes
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={downloadSalesTemplate} className="shrink-0 gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-100 text-xs">
+                <Download className="h-3.5 w-3.5" />{lang === 'ar' ? 'تحميل النموذج' : 'Download Template'}
+              </Button>
             </div>
 
             {/* Restaurant selector */}
