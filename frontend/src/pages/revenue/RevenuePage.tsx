@@ -1,31 +1,72 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
-import PageHeader from '@/components/shared/PageHeader'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import EmptyState from '@/components/shared/EmptyState'
-import ExportButtons from '@/components/shared/ExportButtons'
 import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Pencil, Trash2, DollarSign, Upload, Download, CheckCircle, AlertCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Download, FileSpreadsheet, BarChart3, Calendar, Settings } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, Controller } from 'react-hook-form'
 
-const SOURCES = ['CASH','CARD','BANK_TRANSFER','HUNGER_STATION','JAHEZ','TOYOU','NOON','CAREEM','OTHER']
-const SOURCE_AR: Record<string, string> = {
-  CASH: 'نقدي', CARD: 'بطاقة', BANK_TRANSFER: 'تحويل بنكي',
-  HUNGER_STATION: 'هنقرستيشن', JAHEZ: 'جاهز', TOYOU: 'توصيل',
-  NOON: 'نون', CAREEM: 'كريم', OTHER: 'أخرى',
+type DailyRecord = {
+  id: string
+  date: string
+  vatMode: string
+  vatRate: number
+  cashSales: number
+  cardSales: number
+  hungerStation: number
+  jahez: number
+  noonFood: number
+  talabat: number
+  app5: number
+  app6: number
+  openingBalance: number
+  cashExpenses: number
+  closingBalance: number
+  notes?: string
+  restaurant?: { nameAr: string; nameEn: string }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FormValues = Record<string, any>
+
+function SummaryCard({ label, value, sub, dark }: { label: string; value: number; sub?: string; dark?: boolean }) {
+  return (
+    <div className={`rounded-xl p-4 ${dark ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200'}`}>
+      <p className={`text-xs font-medium uppercase tracking-wide mb-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{label}</p>
+      <p className={`text-2xl font-bold ${dark ? 'text-white' : 'text-gray-900'}`}>
+        SAR <CurrencyDisplay amount={value} />
+      </p>
+      {sub && <p className={`text-xs mt-1 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>{sub}</p>}
+    </div>
+  )
+}
+
+function ChannelInput({ label, icon, registerName, register }: { label: string; icon?: string; registerName: string; register: ReturnType<typeof useForm<FormValues>>['register'] }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-gray-600">{icon && <span className="mr-1">{icon}</span>}{label}</Label>
+      <div className="flex items-center border rounded-lg overflow-hidden bg-white">
+        <span className="px-3 py-2 text-xs text-gray-500 bg-gray-50 border-r">SAR</span>
+        <Input
+          type="number"
+          step="0.01"
+          defaultValue={0}
+          className="border-0 rounded-none focus-visible:ring-0 text-sm"
+          {...register(registerName, { valueAsNumber: true })}
+        />
+      </div>
+    </div>
+  )
 }
 
 export default function RevenuePage() {
@@ -33,324 +74,341 @@ export default function RevenuePage() {
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
-  const [editing, setEditing] = useState<Record<string, unknown> | null>(null)
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [restaurantFilter, setRestaurantFilter] = useState('all')
-  const [importResult, setImportResult] = useState<{created: number; errors: string[]; total: number} | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [editing, setEditing] = useState<DailyRecord | null>(null)
+  const [monthFilter, setMonthFilter] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
 
-  const params = new URLSearchParams()
-  if (from) params.set('from', from)
-  if (to) params.set('to', to)
-  if (restaurantFilter && restaurantFilter !== 'all') params.set('restaurantId', restaurantFilter)
-  params.set('limit', '500')
+  const [from, to] = (() => {
+    const [y, m] = monthFilter.split('-').map(Number)
+    const start = new Date(y, m - 1, 1)
+    const end = new Date(y, m, 0)
+    return [start.toISOString().split('T')[0], end.toISOString().split('T')[0]]
+  })()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['revenue', from, to, restaurantFilter],
-    queryFn: () => api.get(`/api/v1/revenue?${params}`).then(r => r.data),
+    queryKey: ['daily-sales', from, to],
+    queryFn: () => api.get(`/api/v1/daily-sales?from=${from}&to=${to}&limit=200`).then(r => r.data),
   })
+
   const { data: restaurants } = useQuery({
     queryKey: ['restaurants'],
     queryFn: () => api.get('/api/v1/restaurants?limit=100').then(r => r.data.data),
   })
-  const { data: summary } = useQuery({
-    queryKey: ['revenue-summary', from, to, restaurantFilter],
-    queryFn: () => api.get(`/api/v1/revenue/summary?${params}`).then(r => r.data.data),
-  })
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { register, handleSubmit, control, reset, watch, setValue } = useForm<any>({
-    defaultValues: { isVatInclusive: true, vatRate: 15, amount: 0 }
-  })
-
-  const watchAmount = watch('amount')
-  const watchVatRate = watch('vatRate', 15)
-  const watchInclusive = watch('isVatInclusive', true)
-
-  const calcVat = (amount: number, rate: number, inclusive: boolean) => {
-    if (!amount || !rate) return { vatAmount: 0, exVat: amount || 0 }
-    if (inclusive) {
-      const vatAmount = (amount * rate) / (100 + rate)
-      return { vatAmount, exVat: amount - vatAmount }
+  const { register, handleSubmit, control, reset, watch } = useForm<FormValues>({
+    defaultValues: {
+      date: new Date().toISOString().split('T')[0],
+      vatMode: 'INCLUSIVE',
+      cashSales: 0, cardSales: 0,
+      hungerStation: 0, jahez: 0, noonFood: 0, talabat: 0, app5: 0, app6: 0,
+      openingBalance: 0, cashExpenses: 0,
     }
-    return { vatAmount: (amount * rate) / 100, exVat: amount }
-  }
+  })
 
-  const { vatAmount, exVat } = calcVat(Number(watchAmount), Number(watchVatRate), Boolean(watchInclusive))
+  const watchedValues = watch()
+  const totalRevenue = ['cashSales', 'cardSales', 'hungerStation', 'jahez', 'noonFood', 'talabat', 'app5', 'app6']
+    .reduce((s, k) => s + (Number(watchedValues[k]) || 0), 0)
 
-  const createMutation = useMutation({
-    mutationFn: (d: Record<string, unknown>) => {
-      const amt = Number(d.amount)
-      const rate = Number(d.vatRate || 15)
-      const inclusive = Boolean(d.isVatInclusive)
-      const { vatAmount, exVat } = calcVat(amt, rate, inclusive)
-      return editing
-        ? api.put(`/api/v1/revenue/${(editing as {id: string}).id}`, { ...d, vatAmount, amountExVat: exVat })
-        : api.post('/api/v1/revenue', { ...d, vatAmount, amountExVat: exVat })
-    },
+  const vatRate = 15
+  const vatAmount = watchedValues.vatMode === 'EXCLUSIVE'
+    ? (totalRevenue * vatRate) / 100
+    : (totalRevenue * vatRate) / (100 + vatRate)
+
+  const saveMutation = useMutation({
+    mutationFn: (d: FormValues) => editing
+      ? api.put(`/api/v1/daily-sales/${editing.id}`, d)
+      : api.post('/api/v1/daily-sales', d),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['revenue'] })
-      qc.invalidateQueries({ queryKey: ['revenue-summary'] })
+      qc.invalidateQueries({ queryKey: ['daily-sales'] })
       setOpen(false); reset()
       toast({ title: lang === 'ar' ? 'تم الحفظ' : 'Saved', variant: 'success' })
     },
-    onError: (e: unknown) => toast({ title: (e as {response?: {data?: {message?: string}}})?.response?.data?.message || 'Error', variant: 'destructive' }),
+    onError: () => toast({ title: 'Error saving record', variant: 'destructive' }),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/v1/revenue/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['revenue'] }); toast({ title: lang === 'ar' ? 'تم الحذف' : 'Deleted' }) },
+    mutationFn: (id: string) => api.delete(`/api/v1/daily-sales/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['daily-sales'] })
+      toast({ title: lang === 'ar' ? 'تم الحذف' : 'Deleted' })
+    },
   })
 
-  const importMutation = useMutation({
-    mutationFn: (file: File) => {
-      const fd = new FormData(); fd.append('file', file)
-      return api.post('/api/v1/import/revenue', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data.data)
-    },
-    onSuccess: (result) => {
-      setImportResult(result)
-      qc.invalidateQueries({ queryKey: ['revenue'] })
-      toast({ title: lang === 'ar' ? `تم استيراد ${result.created} إيراد` : `Imported ${result.created} entries`, variant: 'success' })
-    },
-    onError: () => toast({ title: lang === 'ar' ? 'فشل الاستيراد' : 'Import failed', variant: 'destructive' }),
-  })
-
-  const openAdd = () => { setEditing(null); reset({ date: new Date().toISOString().split('T')[0], isVatInclusive: true, vatRate: 15 }); setOpen(true) }
-  const openEdit = (row: Record<string, unknown>) => {
-    setEditing(row)
-    reset({ ...row, date: new Date(row.date as string).toISOString().split('T')[0] })
+  const openAdd = () => {
+    setEditing(null)
+    reset({
+      date: new Date().toISOString().split('T')[0],
+      vatMode: 'EXCLUSIVE',
+      cashSales: 0, cardSales: 0,
+      hungerStation: 0, jahez: 0, noonFood: 0, talabat: 0, app5: 0, app6: 0,
+      openingBalance: 0, cashExpenses: 0,
+    })
     setOpen(true)
   }
 
-  const entries = data?.data?.entries || []
-  const totalAmount = data?.data?.totalAmount || 0
-  const totalVat = entries.reduce((s: number, e: Record<string, unknown>) => s + Number(e.vatAmount || 0), 0)
+  const openEdit = (row: DailyRecord) => {
+    setEditing(row)
+    reset({
+      ...row,
+      date: new Date(row.date).toISOString().split('T')[0],
+    })
+    setOpen(true)
+  }
+
+  const records: DailyRecord[] = data?.data || []
+
+  // Compute summary from records
+  const summary = records.reduce((acc, r) => {
+    const apps = Number(r.hungerStation) + Number(r.jahez) + Number(r.noonFood) + Number(r.talabat) + Number(r.app5) + Number(r.app6)
+    const total = Number(r.cashSales) + Number(r.cardSales) + apps
+    const vat = r.vatMode === 'EXCLUSIVE'
+      ? (total * Number(r.vatRate)) / 100
+      : (total * Number(r.vatRate)) / (100 + Number(r.vatRate))
+    acc.totalRevenue += total
+    acc.netSales += total - (r.vatMode === 'EXCLUSIVE' ? 0 : vat)
+    acc.outputVat += vat
+    acc.cashTotal += Number(r.cashSales)
+    acc.cardTotal += Number(r.cardSales)
+    acc.deliveryApps += apps
+    return acc
+  }, { totalRevenue: 0, netSales: 0, outputVat: 0, cashTotal: 0, cardTotal: 0, deliveryApps: 0 })
+
+  const vatModeLabel = (mode: string) => mode === 'EXCLUSIVE'
+    ? (lang === 'ar' ? 'حصري (أضف 15% ضريبة)' : 'Exclusive (Add 15% VAT)')
+    : (lang === 'ar' ? 'شامل الضريبة' : 'VAT Inclusive')
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={lang === 'ar' ? 'الإيرادات' : 'Revenue'}
-        actions={
-          <div className="flex gap-2 flex-wrap">
-            <Button variant="outline" size="sm" onClick={() => api.get('/api/v1/import/templates/revenue', { responseType: 'blob' }).then(r => { const url = URL.createObjectURL(r.data); const a = document.createElement('a'); a.href = url; a.download = 'revenue_template.xlsx'; a.click() })} className="gap-2">
-              <Download className="h-4 w-4" />{lang === 'ar' ? 'تنزيل نموذج' : 'Template'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={importMutation.isPending} className="gap-2">
-              <Upload className="h-4 w-4" />{lang === 'ar' ? 'استيراد Excel' : 'Import Excel'}
-            </Button>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { if (e.target.files?.[0]) { importMutation.mutate(e.target.files[0]); e.target.value = '' } }} />
-            <ExportButtons data={entries} filename="revenue" />
-            <Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة إيراد' : 'Add Revenue'}</Button>
-          </div>
-        }
-      />
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{lang === 'ar' ? 'المبيعات وإدارة النقد' : 'Sales & Cash Management'}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{lang === 'ar' ? 'تتبع الإيرادات اليومية حسب قناة الدفع مع إدارة ضريبة القيمة المضافة' : 'Daily revenue tracking by payment channel with VAT handling.'}</p>
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          <input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <Button variant="outline" size="sm" className="gap-2 text-green-700 border-green-300 hover:bg-green-50">
+            <Download className="h-4 w-4" />{lang === 'ar' ? 'تصدير' : 'Export'}
+          </Button>
+          <Button onClick={openAdd} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
+            <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة سجل يومي' : 'Add Daily Record'}
+          </Button>
+          <Button variant="outline" size="sm">
+            <FileSpreadsheet className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
-      {importResult && (
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle className="h-4 w-4 text-green-600" />
-              <span className="font-medium text-sm">{lang === 'ar' ? `تم استيراد ${importResult.created} من ${importResult.total}` : `Imported ${importResult.created} of ${importResult.total}`}</span>
-              <Button variant="ghost" size="sm" className="ms-auto h-6 text-xs" onClick={() => setImportResult(null)}>✕</Button>
-            </div>
-            {importResult.errors.length > 0 && (
-              <div className="space-y-1">
-                {importResult.errors.slice(0, 5).map((e, i) => <p key={i} className="text-xs text-red-600 flex items-center gap-1"><AlertCircle className="h-3 w-3" />{e}</p>)}
-                {importResult.errors.length > 5 && <p className="text-xs text-muted-foreground">+{importResult.errors.length - 5} more errors</p>}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <SummaryCard dark label={lang === 'ar' ? 'إجمالي الإيرادات' : 'TOTAL REVENUE'} value={summary.totalRevenue} sub={lang === 'ar' ? 'كما أُدخل' : 'as entered'} />
+        <SummaryCard label={lang === 'ar' ? 'صافي المبيعات (بدون ضريبة)' : 'NET SALES (EXCL. VAT)'} value={summary.netSales} sub={lang === 'ar' ? 'الوعاء الخاضع للضريبة' : 'taxable base'} />
+        <SummaryCard label={lang === 'ar' ? 'ضريبة القيمة المضافة (15%)' : 'OUTPUT VAT (15%)'} value={summary.outputVat} sub="ZATCA" />
+        <SummaryCard label={lang === 'ar' ? 'إجمالي النقد' : 'CASH TOTAL'} value={summary.cashTotal} sub={lang === 'ar' ? 'قناة النقد' : 'cash channel'} />
+        <SummaryCard label={lang === 'ar' ? 'إجمالي البطاقة' : 'CARD TOTAL'} value={summary.cardTotal} sub="POS / Visa" />
+        <SummaryCard label={lang === 'ar' ? 'تطبيقات التوصيل' : 'DELIVERY APPS'} value={summary.deliveryApps} sub={lang === 'ar' ? 'جميع التطبيقات' : 'all apps combined'} />
+      </div>
 
-      <Tabs defaultValue="list">
-        <TabsList>
-          <TabsTrigger value="list">{lang === 'ar' ? 'السجلات' : 'Entries'}</TabsTrigger>
-          <TabsTrigger value="bySource">{lang === 'ar' ? 'حسب المصدر' : 'By Source'}</TabsTrigger>
+      {/* Tabs */}
+      <Tabs defaultValue="records">
+        <TabsList className="bg-white border rounded-lg p-1 gap-1">
+          <TabsTrigger value="records" className="gap-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+            <Calendar className="h-4 w-4" />{lang === 'ar' ? 'السجلات اليومية' : 'Daily Records'}
+          </TabsTrigger>
+          <TabsTrigger value="reports" className="gap-2">
+            <BarChart3 className="h-4 w-4" />{lang === 'ar' ? 'التقارير' : 'Reports'}
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="gap-2">
+            <Settings className="h-4 w-4" />{lang === 'ar' ? 'الإعدادات' : 'Settings'}
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="list" className="space-y-4">
-          {/* Filters */}
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="space-y-1"><Label className="text-xs">{lang === 'ar' ? 'من' : 'From'}</Label><Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36" /></div>
-            <div className="space-y-1"><Label className="text-xs">{lang === 'ar' ? 'إلى' : 'To'}</Label><Input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-36" /></div>
-            <div className="space-y-1">
-              <Label className="text-xs">{lang === 'ar' ? 'المطعم' : 'Restaurant'}</Label>
-              <Select value={restaurantFilter} onValueChange={setRestaurantFilter}>
-                <SelectTrigger className="w-48"><SelectValue placeholder={lang === 'ar' ? 'كل المطاعم' : 'All'} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{lang === 'ar' ? 'كل المطاعم' : 'All'}</SelectItem>
-                  {Array.isArray(restaurants) && restaurants.map((r: {id: string; nameAr: string; nameEn: string}) => (
-                    <SelectItem key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card className="bg-green-50 border-green-200">
-              <CardContent className="flex items-center gap-3 p-4">
-                <DollarSign className="h-5 w-5 text-green-600" />
-                <div>
-                  <p className="text-xs text-green-700">{lang === 'ar' ? 'إجمالي الإيرادات' : 'Total Revenue'}</p>
-                  <p className="text-xl font-bold text-green-800"><CurrencyDisplay amount={totalAmount} /></p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-blue-50 border-blue-200">
-              <CardContent className="flex items-center gap-3 p-4">
-                <DollarSign className="h-5 w-5 text-blue-600" />
-                <div>
-                  <p className="text-xs text-blue-700">{lang === 'ar' ? 'ضريبة القيمة المضافة' : 'VAT Collected'}</p>
-                  <p className="text-xl font-bold text-blue-800"><CurrencyDisplay amount={totalVat} /></p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-purple-50 border-purple-200">
-              <CardContent className="flex items-center gap-3 p-4">
-                <DollarSign className="h-5 w-5 text-purple-600" />
-                <div>
-                  <p className="text-xs text-purple-700">{lang === 'ar' ? 'الإيرادات بدون ضريبة' : 'Revenue ex-VAT'}</p>
-                  <p className="text-xl font-bold text-purple-800"><CurrencyDisplay amount={totalAmount - totalVat} /></p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {isLoading ? <LoadingSpinner /> : entries.length === 0 ? (
-            <EmptyState title={lang === 'ar' ? 'لا توجد إيرادات' : 'No revenue entries'} action={{ label: lang === 'ar' ? 'إضافة إيراد' : 'Add Revenue', onClick: openAdd }} />
+        <TabsContent value="records" className="mt-4">
+          {isLoading ? <LoadingSpinner /> : records.length === 0 ? (
+            <EmptyState title={lang === 'ar' ? 'لا توجد سجلات' : 'No daily records'} action={{ label: lang === 'ar' ? 'إضافة سجل' : 'Add Daily Record', onClick: openAdd }} />
           ) : (
-            <Card>
+            <div className="bg-white border rounded-xl overflow-hidden">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>{lang === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
-                    <TableHead>{lang === 'ar' ? 'المطعم' : 'Restaurant'}</TableHead>
-                    <TableHead>{lang === 'ar' ? 'المصدر' : 'Source'}</TableHead>
-                    <TableHead>{lang === 'ar' ? 'المبلغ' : 'Amount'}</TableHead>
-                    <TableHead>{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
-                    <TableHead>{lang === 'ar' ? 'بدون ضريبة' : 'Ex-VAT'}</TableHead>
-                    <TableHead>{lang === 'ar' ? 'ملاحظات' : 'Notes'}</TableHead>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'التاريخ' : 'DATE'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'نقد' : 'CASH'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'بطاقة' : 'CARD'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500 text-purple-600">{lang === 'ar' ? 'إجمالي التطبيقات' : 'APPS TOTAL'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'إجمالي الإيرادات' : 'TOTAL REVENUE'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500 text-blue-600">{lang === 'ar' ? 'صافي المبيعات' : 'NET SALES'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'رصيد الافتتاح' : 'OPENING BAL'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'رصيد الختام' : 'CLOSING BAL'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'ملاحظات' : 'NOTES'}</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {entries.map((row: Record<string, unknown>) => (
-                    <TableRow key={row.id as string}>
-                      <TableCell>{new Date(row.date as string).toLocaleDateString(lang === 'ar' ? 'ar-SA' : 'en-US')}</TableCell>
-                      <TableCell>{lang === 'ar' ? (row.restaurant as {nameAr: string})?.nameAr : (row.restaurant as {nameEn: string})?.nameEn}</TableCell>
-                      <TableCell><Badge variant="secondary">{lang === 'ar' ? SOURCE_AR[row.source as string] : row.source as string}</Badge></TableCell>
-                      <TableCell className="font-medium"><CurrencyDisplay amount={row.amount as number} /></TableCell>
-                      <TableCell className="text-blue-600 text-sm"><CurrencyDisplay amount={row.vatAmount as number} /></TableCell>
-                      <TableCell className="text-sm"><CurrencyDisplay amount={row.amountExVat as number} /></TableCell>
-                      <TableCell className="text-muted-foreground text-sm">{row.notes as string}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => openEdit(row)}><Pencil className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(row.id as string)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {records.map((row) => {
+                    const apps = Number(row.hungerStation) + Number(row.jahez) + Number(row.noonFood) + Number(row.talabat) + Number(row.app5) + Number(row.app6)
+                    const total = Number(row.cashSales) + Number(row.cardSales) + apps
+                    const vat = row.vatMode === 'EXCLUSIVE'
+                      ? (total * Number(row.vatRate)) / 100
+                      : (total * Number(row.vatRate)) / (100 + Number(row.vatRate))
+                    const netSales = row.vatMode === 'EXCLUSIVE' ? total : total - vat
+                    const dateStr = new Date(row.date).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+                    return (
+                      <TableRow key={row.id}>
+                        <TableCell>
+                          <div className="font-medium text-sm">{dateStr}</div>
+                          <div className="text-xs text-gray-400">{row.vatMode === 'EXCLUSIVE' ? 'VAT Excl.' : 'VAT Incl.'}</div>
+                        </TableCell>
+                        <TableCell className="text-sm">SAR {Number(row.cashSales).toFixed(2)}</TableCell>
+                        <TableCell className="text-sm">SAR {Number(row.cardSales).toFixed(2)}</TableCell>
+                        <TableCell className="text-sm text-purple-600 font-medium">SAR {apps.toFixed(2)}</TableCell>
+                        <TableCell className="font-bold text-sm">SAR {total.toFixed(2)}</TableCell>
+                        <TableCell className="text-sm text-gray-600">SAR {vat.toFixed(2)}</TableCell>
+                        <TableCell className="text-sm text-blue-600 font-semibold">SAR {netSales.toFixed(2)}</TableCell>
+                        <TableCell className="text-sm">SAR {Number(row.openingBalance).toFixed(2)}</TableCell>
+                        <TableCell className="text-sm">SAR {Number(row.closingBalance).toFixed(2)}</TableCell>
+                        <TableCell className="text-sm text-gray-500">{row.notes || '—'}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(row)}>
+                              <Pencil className="h-3.5 w-3.5 text-gray-500" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteMutation.mutate(row.id)}>
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
-            </Card>
+            </div>
           )}
         </TabsContent>
 
-        <TabsContent value="bySource">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {SOURCES.map(source => {
-              const sourceData = summary?.bySource?.find((s: {source: string}) => s.source === source)
-              const amount = sourceData ? Number(sourceData._sum?.amount || 0) : 0
-              if (amount === 0) return null
-              return (
-                <Card key={source}>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{lang === 'ar' ? SOURCE_AR[source] : source}</CardTitle></CardHeader>
-                  <CardContent><p className="text-2xl font-bold"><CurrencyDisplay amount={amount} /></p></CardContent>
-                </Card>
-              )
-            }).filter(Boolean)}
+        <TabsContent value="reports" className="mt-4">
+          <div className="bg-white border rounded-xl p-8 text-center text-gray-400">
+            <BarChart3 className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p>{lang === 'ar' ? 'قريباً - تقارير المبيعات التفصيلية' : 'Coming soon — detailed sales reports'}</p>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="settings" className="mt-4">
+          <div className="bg-white border rounded-xl p-8 text-center text-gray-400">
+            <Settings className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p>{lang === 'ar' ? 'إعدادات نظام المبيعات' : 'Sales system settings'}</p>
           </div>
         </TabsContent>
       </Tabs>
 
+      {/* Add/Edit Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing ? (lang === 'ar' ? 'تعديل إيراد' : 'Edit Revenue') : (lang === 'ar' ? 'إضافة إيراد' : 'Add Revenue')}</DialogTitle>
+            <DialogTitle className="text-base font-semibold">
+              {editing ? (lang === 'ar' ? 'تعديل سجل يومي' : 'Edit Daily Sales Record') : (lang === 'ar' ? 'إضافة سجل مبيعات يومي' : 'Add Daily Sales Record')}
+            </DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit(d => createMutation.mutate(d as Record<string, unknown>))} className="space-y-4">
+          <form onSubmit={handleSubmit(d => saveMutation.mutate(d))} className="space-y-5">
+            {/* Date + VAT Mode */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>{lang === 'ar' ? 'التاريخ' : 'Date'}</Label>
+              <div className="space-y-1">
+                <Label className="text-xs">{lang === 'ar' ? 'التاريخ' : 'Date'} <span className="text-red-500">*</span></Label>
                 <Input type="date" {...register('date', { required: true })} />
               </div>
-              <div className="space-y-1.5">
-                <Label>{lang === 'ar' ? 'المبلغ' : 'Amount (SAR)'}</Label>
-                <Input type="number" step="0.01" placeholder="0.00" {...register('amount', { required: true, valueAsNumber: true })} />
+              <div className="space-y-1">
+                <Label className="text-xs">{lang === 'ar' ? 'وضع الضريبة' : 'VAT Mode'}</Label>
+                <Controller name="vatMode" control={control} render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="EXCLUSIVE">{lang === 'ar' ? 'حصري (أضف 15%)' : 'Exclusive (Add 15% VAT)'}</SelectItem>
+                      <SelectItem value="INCLUSIVE">{lang === 'ar' ? 'شامل الضريبة' : 'VAT Inclusive'}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )} />
+                {watchedValues.vatMode === 'EXCLUSIVE' && (
+                  <p className="text-xs text-gray-400">{lang === 'ar' ? 'أدخل المبالغ بدون ضريبة — النظام يضيف 15%' : 'Enter amounts without VAT — system adds 15%'}</p>
+                )}
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>{lang === 'ar' ? 'المطعم' : 'Restaurant'}</Label>
-              <Controller name="restaurantId" control={control} rules={{ required: true }} render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger><SelectValue placeholder={lang === 'ar' ? 'اختر المطعم' : 'Select restaurant'} /></SelectTrigger>
-                  <SelectContent>
-                    {Array.isArray(restaurants) && restaurants.map((r: {id: string; nameAr: string; nameEn: string}) => (
-                      <SelectItem key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>{lang === 'ar' ? 'المصدر' : 'Source'}</Label>
-              <Controller name="source" control={control} rules={{ required: true }} render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger><SelectValue placeholder={lang === 'ar' ? 'اختر المصدر' : 'Select source'} /></SelectTrigger>
-                  <SelectContent>
-                    {SOURCES.map(s => <SelectItem key={s} value={s}>{lang === 'ar' ? SOURCE_AR[s] : s}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              )} />
-            </div>
 
-            {/* VAT Section */}
-            <div className="rounded-lg border p-4 space-y-3 bg-muted/30">
-              <p className="text-sm font-medium">{lang === 'ar' ? 'إعدادات ضريبة القيمة المضافة' : 'VAT Settings'}</p>
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">{lang === 'ar' ? 'المبلغ شامل الضريبة' : 'Amount includes VAT'}</Label>
-                <Controller name="isVatInclusive" control={control} render={({ field }) => (
-                  <Switch checked={Boolean(field.value)} onCheckedChange={field.onChange} />
+            {/* Restaurant */}
+            {Array.isArray(restaurants) && restaurants.length > 0 && (
+              <div className="space-y-1">
+                <Label className="text-xs">{lang === 'ar' ? 'المطعم' : 'Restaurant'}</Label>
+                <Controller name="restaurantId" control={control} render={({ field }) => (
+                  <Select value={field.value || ''} onValueChange={field.onChange}>
+                    <SelectTrigger><SelectValue placeholder={lang === 'ar' ? 'اختر المطعم' : 'Select restaurant'} /></SelectTrigger>
+                    <SelectContent>
+                      {restaurants.map((r: { id: string; nameAr: string; nameEn: string }) => (
+                        <SelectItem key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )} />
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">{lang === 'ar' ? 'نسبة الضريبة %' : 'VAT Rate %'}</Label>
-                  <Input type="number" step="0.01" {...register('vatRate', { valueAsNumber: true })} onChange={e => setValue('vatRate', parseFloat(e.target.value))} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">{lang === 'ar' ? 'مبلغ الضريبة' : 'VAT Amount'}</Label>
-                  <Input value={vatAmount.toFixed(2)} readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">{lang === 'ar' ? 'بدون ضريبة' : 'Ex-VAT'}</Label>
-                  <Input value={exVat.toFixed(2)} readOnly className="bg-muted" />
-                </div>
+            )}
+
+            {/* Revenue by Payment Channel */}
+            <div className="rounded-xl border border-blue-100 bg-blue-50/30 p-4 space-y-3">
+              <p className="text-xs font-semibold text-blue-700 flex items-center gap-1.5">
+                <BarChart3 className="h-3.5 w-3.5" />{lang === 'ar' ? 'الإيرادات حسب قناة الدفع' : 'Revenue by Payment Channel'}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <ChannelInput label={lang === 'ar' ? 'مبيعات نقدية (ر.س)' : 'Cash Sales (SAR)'} icon="💵" registerName="cashSales" register={register} />
+                <ChannelInput label={lang === 'ar' ? 'بطاقة / POS / فيزا (ر.س)' : 'Card / POS / Visa (SAR)'} icon="💳" registerName="cardSales" register={register} />
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>{lang === 'ar' ? 'ملاحظات' : 'Notes'}</Label>
-              <Input {...register('notes')} placeholder={lang === 'ar' ? 'ملاحظات اختيارية' : 'Optional'} />
+            {/* Delivery Apps */}
+            <div className="rounded-xl border border-purple-100 bg-purple-50/30 p-4 space-y-3">
+              <p className="text-xs font-semibold text-purple-700 flex items-center gap-1.5">
+                □ {lang === 'ar' ? 'تطبيقات التوصيل' : 'Delivery Apps'}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <ChannelInput label="HungerStation" registerName="hungerStation" register={register} />
+                <ChannelInput label="Jahez" registerName="jahez" register={register} />
+                <ChannelInput label="Noon Food" registerName="noonFood" register={register} />
+                <ChannelInput label="Talabat" registerName="talabat" register={register} />
+                <ChannelInput label="App 5" registerName="app5" register={register} />
+                <ChannelInput label="App 6" registerName="app6" register={register} />
+              </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
+
+            {/* Cash Management */}
+            <div className="rounded-xl border border-yellow-100 bg-yellow-50/30 p-4 space-y-3">
+              <p className="text-xs font-semibold text-yellow-700 flex items-center gap-1.5">
+                🗃 {lang === 'ar' ? 'إدارة النقد' : 'Cash Management'}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <ChannelInput label={lang === 'ar' ? 'رصيد الافتتاح (ر.س)' : 'Opening Balance (SAR)'} registerName="openingBalance" register={register} />
+                <ChannelInput label={lang === 'ar' ? 'مصاريف نقدية (ر.س)' : 'Cash Expenses (SAR)'} registerName="cashExpenses" register={register} />
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-1">
+              <Label className="text-xs">{lang === 'ar' ? 'ملاحظات' : 'Notes'}</Label>
+              <Input {...register('notes')} placeholder={lang === 'ar' ? 'اختياري' : 'Optional'} />
+            </div>
+
+            {/* VAT Preview */}
+            <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 flex justify-between">
+              <span>{lang === 'ar' ? 'إجمالي الإيرادات' : 'Total Revenue'}: <strong>SAR {totalRevenue.toFixed(2)}</strong></span>
+              <span>{lang === 'ar' ? 'الضريبة المحسوبة' : 'Computed VAT'}: <strong>SAR {vatAmount.toFixed(2)}</strong></span>
+              <span>{lang === 'ar' ? 'الوضع' : 'Mode'}: <strong>{vatModeLabel(watchedValues.vatMode)}</strong></span>
+            </div>
+
+            <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>{lang === 'ar' ? 'إلغاء' : 'Cancel'}</Button>
-              <Button type="submit" disabled={createMutation.isPending}>{lang === 'ar' ? 'حفظ' : 'Save'}</Button>
+              <Button type="submit" disabled={saveMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
+                {lang === 'ar' ? 'حفظ السجل' : 'Save Record'}
+              </Button>
             </div>
           </form>
         </DialogContent>

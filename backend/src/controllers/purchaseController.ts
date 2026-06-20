@@ -170,3 +170,63 @@ export const getPurchaseReturns = async (req: AuthRequest, res: Response) => {
     sendPaginated(res, data, total, page, limit);
   } catch { sendError(res, 'Failed to fetch returns', 500); }
 };
+
+export const getPurchaseLines = async (req: AuthRequest, res: Response) => {
+  try {
+    const { page, limit, skip } = getPagination(req);
+    const invoiceWhere: Prisma.PurchaseInvoiceWhereInput = { companyId: req.user!.companyId };
+    if (req.query.supplierId) invoiceWhere.supplierId = req.query.supplierId as string;
+    if (req.query.paymentMethod) invoiceWhere.paymentMethod = req.query.paymentMethod as 'CASH' | 'BANK' | 'CREDIT';
+    if (req.query.invoiceType) invoiceWhere.invoiceType = req.query.invoiceType as string;
+    const from = req.query.from ? new Date(req.query.from as string) : undefined;
+    const to = req.query.to ? new Date(req.query.to as string) : undefined;
+    if (from || to) invoiceWhere.invoiceDate = { gte: from, lte: to ? new Date(new Date(to).setHours(23, 59, 59)) : undefined };
+
+    const lineWhere: Prisma.PurchaseInvoiceLineWhereInput = { invoice: invoiceWhere };
+    if (req.query.categoryId) lineWhere.item = { categoryId: req.query.categoryId as string };
+    if (req.query.search) lineWhere.item = { ...lineWhere.item as object, OR: [{ nameAr: { contains: req.query.search as string } }, { nameEn: { contains: req.query.search as string, mode: 'insensitive' } }] };
+
+    const [data, total] = await Promise.all([
+      prisma.purchaseInvoiceLine.findMany({
+        where: lineWhere, skip, take: limit,
+        orderBy: { invoice: { invoiceDate: 'desc' } },
+        include: {
+          item: { select: { nameAr: true, nameEn: true, unit: true, category: { select: { nameAr: true, nameEn: true } } } },
+          invoice: {
+            select: {
+              invoiceDate: true, invoiceNumber: true, invoiceType: true, paymentMethod: true,
+              supplier: { select: { nameAr: true, nameEn: true } },
+            },
+          },
+        },
+      }),
+      prisma.purchaseInvoiceLine.count({ where: lineWhere }),
+    ]);
+
+    // Summary aggregation
+    const summaryData = await prisma.purchaseInvoiceLine.findMany({
+      where: lineWhere,
+      include: { invoice: { select: { invoiceType: true, paymentMethod: true } } },
+    });
+
+    let taxableNet = 0, inputVat = 0, nonTaxableTotal = 0;
+    for (const line of summaryData) {
+      const net = Number(line.unitPrice) * Number(line.quantity);
+      const vat = Number(line.vatAmount);
+      if (line.invoice.invoiceType === 'TAX') {
+        taxableNet += net;
+        inputVat += vat;
+      } else {
+        nonTaxableTotal += net;
+      }
+    }
+
+    const cashTotal = summaryData.filter(l => l.invoice.paymentMethod === 'CASH').reduce((s, l) => s + Number(l.unitPrice) * Number(l.quantity) + Number(l.vatAmount), 0);
+    const cardTotal = summaryData.filter(l => l.invoice.paymentMethod === 'BANK').reduce((s, l) => s + Number(l.unitPrice) * Number(l.quantity) + Number(l.vatAmount), 0);
+    const creditTotal = summaryData.filter(l => l.invoice.paymentMethod === 'CREDIT').reduce((s, l) => s + Number(l.unitPrice) * Number(l.quantity) + Number(l.vatAmount), 0);
+
+    sendPaginated(res, data, total, page, limit, {
+      summary: { taxableNet, inputVat, nonTaxableTotal, taxableWithVat: taxableNet + inputVat, cashTotal, cardTotal, creditTotal, totalPurchases: cashTotal + cardTotal + creditTotal }
+    });
+  } catch (err) { console.error(err); sendError(res, 'Failed to fetch lines', 500); }
+};

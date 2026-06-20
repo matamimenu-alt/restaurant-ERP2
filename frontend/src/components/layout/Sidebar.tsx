@@ -21,13 +21,13 @@ const navItems: NavItem[] = [
   { labelAr: 'لوحة التحكم', labelEn: 'Dashboard', path: '/', icon: LayoutDashboard },
   { labelAr: 'التحليلات التنفيذية', labelEn: 'Executive Analytics', path: '/analytics', icon: TrendingUp },
   {
-    labelAr: 'الإيرادات', labelEn: 'Revenue', icon: DollarSign,
-    children: [{ labelAr: 'إدخال الإيرادات', labelEn: 'Revenue Entry', path: '/revenue', icon: DollarSign }]
+    labelAr: 'المبيعات والإيرادات', labelEn: 'Sales & Revenue', icon: DollarSign,
+    children: [{ labelAr: 'المبيعات وإدارة النقد', labelEn: 'Sales & Cash Mgmt', path: '/revenue', icon: DollarSign }]
   },
   {
     labelAr: 'المشتريات', labelEn: 'Purchasing', icon: ShoppingCart,
     children: [
-      { labelAr: 'فواتير الشراء', labelEn: 'Purchase Invoices', path: '/purchases', icon: Receipt },
+      { labelAr: 'المشتريات والمصروفات', labelEn: 'Purchases & Expenses', path: '/purchases', icon: Receipt },
       { labelAr: 'الموردون', labelEn: 'Suppliers', path: '/suppliers', icon: Store },
     ]
   },
@@ -51,10 +51,10 @@ const navItems: NavItem[] = [
     children: [{ labelAr: 'المصروفات', labelEn: 'Expenses', path: '/expenses', icon: Receipt }]
   },
   {
-    labelAr: 'الموارد البشرية', labelEn: 'HR', icon: Users,
+    labelAr: 'الموارد البشرية والرواتب', labelEn: 'HR & Employees', icon: Users,
     children: [
-      { labelAr: 'الموظفون', labelEn: 'Employees', path: '/employees', icon: Users },
-      { labelAr: 'الرواتب', labelEn: 'Payroll', path: '/payroll', icon: Banknote },
+      { labelAr: 'الموارد البشرية والرواتب', labelEn: 'HR & Payroll', path: '/employees', icon: Users },
+      { labelAr: 'مسير الرواتب', labelEn: 'Payroll Runs', path: '/payroll', icon: Banknote },
     ]
   },
   {
