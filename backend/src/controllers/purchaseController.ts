@@ -171,6 +171,16 @@ export const getPurchaseReturns = async (req: AuthRequest, res: Response) => {
   } catch { sendError(res, 'Failed to fetch returns', 500); }
 };
 
+export const deletePurchaseInvoice = async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.purchaseInvoice.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Invoice not found', 404);
+    await prisma.purchaseInvoiceLine.deleteMany({ where: { invoiceId: req.params.id } });
+    await prisma.purchaseInvoice.delete({ where: { id: req.params.id } });
+    sendSuccess(res, { deleted: true });
+  } catch { sendError(res, 'Failed to delete invoice', 500); }
+};
+
 export const getPurchaseLines = async (req: AuthRequest, res: Response) => {
   try {
     const { page, limit, skip } = getPagination(req);
@@ -194,7 +204,7 @@ export const getPurchaseLines = async (req: AuthRequest, res: Response) => {
           item: { select: { nameAr: true, nameEn: true, unit: true, category: { select: { nameAr: true, nameEn: true } } } },
           invoice: {
             select: {
-              invoiceDate: true, invoiceNumber: true, invoiceType: true, paymentMethod: true,
+              id: true, invoiceDate: true, invoiceNumber: true, invoiceType: true, paymentMethod: true,
               supplier: { select: { nameAr: true, nameEn: true } },
             },
           },
