@@ -15,14 +15,27 @@ async function calculateRecipeCost(recipeId: string) {
 export const getRecipes = async (req: AuthRequest, res: Response) => {
   try {
     const { page, limit, skip } = getPagination(req);
-    const where: Record<string, unknown> = { companyId: req.user!.companyId };
-    if (req.query.restaurantId) where.restaurantId = req.query.restaurantId;
+    const companyId = req.user!.companyId;
+    const restaurantId = req.query.restaurantId as string | undefined;
+
+    // Return shared recipes (isShared=true OR restaurantId=null) PLUS restaurant-specific ones
+    const where = restaurantId
+      ? {
+          companyId,
+          OR: [
+            { restaurantId },
+            { isShared: true },
+            { restaurantId: null },
+          ],
+        }
+      : { companyId };
+
     const [data, total] = await Promise.all([
       prisma.recipe.findMany({
-        where, skip, take: limit, orderBy: { nameAr: 'asc' },
+        where, skip, take: limit, orderBy: [{ isShared: 'desc' }, { nameAr: 'asc' }],
         include: {
           lines: { include: { item: { select: { nameAr: true, nameEn: true, unit: true, lastPurchasePrice: true } } } },
-          restaurant: { select: { nameAr: true } },
+          restaurant: { select: { nameAr: true, nameEn: true } },
         },
       }),
       prisma.recipe.count({ where }),
