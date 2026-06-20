@@ -3,7 +3,7 @@ builder = "nixpacks"
 buildCommand = "npm run install:all && npm run db:generate && npm run build"
 
 [deploy]
-startCommand = "cd /app/backend && npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts && node dist/src/index.js"
+startCommand = "cd /app/backend && npx prisma db push --skip-generate --accept-data-loss && npx ts-node prisma/seed.ts && npx ts-node prisma/migrate-data.ts && node dist/src/index.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
