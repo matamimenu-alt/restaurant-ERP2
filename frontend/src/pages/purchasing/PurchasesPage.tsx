@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
@@ -158,8 +158,12 @@ export default function PurchasesPage() {
   const [paymentFilter, setPaymentFilter] = useState('ALL')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  // Restaurant filter — defaults to currently selected restaurant, '' means ALL
-  const [restaurantFilter, setRestaurantFilter] = useState<string>(selectedRestaurant?.id ?? '')
+  // Restaurant filter — follows the selected restaurant; '' means ALL
+  const [showAllRestaurants, setShowAllRestaurants] = useState(false)
+  const restaurantFilter = showAllRestaurants ? '' : (selectedRestaurant?.id ?? '')
+
+  // When the top-bar restaurant changes, reset to single-restaurant view
+  useEffect(() => { setShowAllRestaurants(false) }, [selectedRestaurant?.id])
   const [priceHistory, setPriceHistory] = useState<Record<string, unknown> | null>(null)
 
   // Selection state (track by invoiceId)
@@ -511,19 +515,19 @@ export default function PurchasesPage() {
         <TabsContent value="records" className="mt-4 space-y-4">
           {/* Filters */}
           <div className="bg-white border rounded-xl p-4 space-y-3">
-            {/* Restaurant filter — prominent at top */}
+            {/* Restaurant filter — shows current restaurant by default */}
             <div className="flex items-center gap-3 pb-3 border-b">
               <span className="text-xs font-semibold text-gray-500 shrink-0">{lang === 'ar' ? '🏪 عرض مشتريات:' : '🏪 Show purchases for:'}</span>
-              <div className="flex gap-2 flex-wrap">
-                {Array.isArray(restaurants) && (restaurants as { id: string; nameAr: string; nameEn: string }[]).map(r => (
-                  <button key={r.id} onClick={() => setRestaurantFilter(r.id)}
-                    className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${restaurantFilter === r.id ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'}`}>
-                    {lang === 'ar' ? r.nameAr : r.nameEn}
-                  </button>
-                ))}
-                <button onClick={() => setRestaurantFilter('')}
-                  className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${restaurantFilter === '' ? 'bg-gray-900 text-white border-gray-900 shadow-sm' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'}`}>
-                  {lang === 'ar' ? 'كل المطاعم' : 'All Restaurants'}
+              <div className="flex gap-2 flex-wrap items-center">
+                <span className={`px-3 py-1.5 text-xs rounded-lg font-medium border bg-blue-600 text-white border-blue-600 shadow-sm`}>
+                  {!showAllRestaurants && selectedRestaurant
+                    ? (lang === 'ar' ? selectedRestaurant.nameAr : selectedRestaurant.nameEn)
+                    : (lang === 'ar' ? 'كل المطاعم' : 'All Restaurants')}
+                </span>
+                <span className="text-gray-300 text-xs">|</span>
+                <button onClick={() => setShowAllRestaurants(v => !v)}
+                  className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${showAllRestaurants ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400 hover:text-gray-700'}`}>
+                  {showAllRestaurants ? (lang === 'ar' ? '✓ كل المطاعم مُفعَّل' : '✓ All Restaurants ON') : (lang === 'ar' ? 'عرض كل المطاعم' : 'Show All Restaurants')}
                 </button>
               </div>
             </div>
