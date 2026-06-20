@@ -230,7 +230,7 @@ export const getPurchaseSummaryByRestaurant = async (req: AuthRequest, res: Resp
     const from = req.query.from ? new Date(req.query.from as string) : undefined;
     const to = req.query.to ? new Date(req.query.to as string) : undefined;
     const where: Prisma.PurchaseInvoiceWhereInput = { companyId: req.user!.companyId };
-    if (from || to) where.invoiceDate = { gte: from, lte: to ? new Date(new Date(to as string).setHours(23, 59, 59)) : undefined };
+    if (from || to) where.invoiceDate = { gte: from, lte: to ? new Date(new Date(to as unknown as string).setHours(23, 59, 59)) : undefined };
 
     const invoices = await prisma.purchaseInvoice.findMany({
       where,
