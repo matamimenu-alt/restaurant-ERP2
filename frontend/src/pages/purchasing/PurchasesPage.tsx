@@ -3,6 +3,7 @@ import { useState, useRef, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
+import { useRestaurantStore } from '@/store/restaurantStore'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import EmptyState from '@/components/shared/EmptyState'
 import { Button } from '@/components/ui/button'
@@ -147,6 +148,7 @@ export default function PurchasesPage() {
   const { lang } = useLang()
   const qc = useQueryClient()
   const { toast } = useToast()
+  const { selectedRestaurant } = useRestaurantStore()
   const [open, setOpen] = useState(false)
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -156,6 +158,8 @@ export default function PurchasesPage() {
   const [paymentFilter, setPaymentFilter] = useState('ALL')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  // Restaurant filter — defaults to currently selected restaurant, '' means ALL
+  const [restaurantFilter, setRestaurantFilter] = useState<string>(selectedRestaurant?.id ?? '')
   const [priceHistory, setPriceHistory] = useState<Record<string, unknown> | null>(null)
 
   // Selection state (track by invoiceId)
@@ -188,9 +192,11 @@ export default function PurchasesPage() {
   if (paymentFilter !== 'ALL') params.set('paymentMethod', paymentFilter === 'CARD' ? 'BANK' : paymentFilter)
   if (from) params.set('from', from)
   if (to) params.set('to', to)
+  // Explicit restaurant filter overrides the axios interceptor restaurantId
+  if (restaurantFilter) params.set('restaurantId', restaurantFilter)
 
   const { data: linesData, isLoading } = useQuery({
-    queryKey: ['purchase-lines', search, selectedSupplier, selectedCategory, selectedInvoiceType, paymentFilter, from, to],
+    queryKey: ['purchase-lines', search, selectedSupplier, selectedCategory, selectedInvoiceType, paymentFilter, from, to, restaurantFilter],
     queryFn: () => api.get(`/api/v1/purchases/lines?${params}`).then(r => r.data),
   })
 
@@ -505,6 +511,22 @@ export default function PurchasesPage() {
         <TabsContent value="records" className="mt-4 space-y-4">
           {/* Filters */}
           <div className="bg-white border rounded-xl p-4 space-y-3">
+            {/* Restaurant filter — prominent at top */}
+            <div className="flex items-center gap-3 pb-3 border-b">
+              <span className="text-xs font-semibold text-gray-500 shrink-0">{lang === 'ar' ? '🏪 عرض مشتريات:' : '🏪 Show purchases for:'}</span>
+              <div className="flex gap-2 flex-wrap">
+                {Array.isArray(restaurants) && (restaurants as { id: string; nameAr: string; nameEn: string }[]).map(r => (
+                  <button key={r.id} onClick={() => setRestaurantFilter(r.id)}
+                    className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${restaurantFilter === r.id ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'}`}>
+                    {lang === 'ar' ? r.nameAr : r.nameEn}
+                  </button>
+                ))}
+                <button onClick={() => setRestaurantFilter('')}
+                  className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${restaurantFilter === '' ? 'bg-gray-900 text-white border-gray-900 shadow-sm' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'}`}>
+                  {lang === 'ar' ? 'كل المطاعم' : 'All Restaurants'}
+                </button>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-3 items-end">
               <div className="space-y-1">
                 <Label className="text-xs text-gray-500">{lang === 'ar' ? 'من' : 'From'}</Label>
