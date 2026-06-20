@@ -148,7 +148,24 @@ export default function PurchasesPage() {
           <p className="text-sm text-gray-500 mt-0.5">{lang === 'ar' ? 'تتبع جميع سجلات الشراء والمصروفات مع ضريبة القيمة المضافة.' : 'Track all purchasing and expense records with VAT.'}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <ExportButtons data={lines as unknown as Record<string, unknown>[]} filename="purchases" />
+          <ExportButtons
+            data={lines.map(l => ({
+              'التاريخ': new Date(l.invoice.invoiceDate).toLocaleDateString('en-CA'),
+              'نوع الفاتورة': l.invoice.invoiceType === 'TAX' ? 'ضريبية' : 'بسيطة',
+              'رقم الفاتورة': l.invoice.invoiceNumber,
+              'المنتج': l.item.nameAr,
+              'الفئة': l.item.category ? l.item.category.nameAr : '',
+              'المورد': l.invoice.supplier.nameAr,
+              'طريقة الدفع': l.invoice.paymentMethod === 'CASH' ? 'نقد' : l.invoice.paymentMethod === 'BANK' ? 'بطاقة' : 'آجل',
+              'الكمية': Number(l.quantity),
+              'الوحدة': l.item.unit,
+              'سعر الوحدة': Number(l.unitPrice),
+              'المبلغ الصافي': Number((Number(l.quantity) * Number(l.unitPrice)).toFixed(2)),
+              'الضريبة': Number(l.vatAmount),
+              'الإجمالي': Number(l.total),
+            }))}
+            filename="purchases"
+          />
           <Button onClick={() => { reset(); setOpen(true) }} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة فاتورة' : 'Add Invoice'}
           </Button>

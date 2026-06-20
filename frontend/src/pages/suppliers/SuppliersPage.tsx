@@ -59,7 +59,19 @@ export default function SuppliersPage() {
         title={lang === 'ar' ? 'الموردون' : 'Suppliers'}
         actions={
           <div className="flex gap-2">
-            <ExportButtons data={suppliers} filename="suppliers" />
+            <ExportButtons
+              data={suppliers.map((s: Record<string, unknown>) => ({
+                'اسم المورد (عربي)': s.nameAr,
+                'اسم المورد (إنجليزي)': s.nameEn,
+                'الجوال': s.mobile || '',
+                'البريد الإلكتروني': s.email || '',
+                'الرقم الضريبي': s.vatNumber || '',
+                'العنوان': s.address || '',
+                'شروط الدفع (أيام)': s.paymentTerms || 0,
+                'الحالة': s.isActive ? 'نشط' : 'غير نشط',
+              }))}
+              filename="suppliers"
+            />
             <Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة مورد' : 'Add Supplier'}</Button>
           </div>
         }

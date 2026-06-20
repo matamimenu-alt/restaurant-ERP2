@@ -191,7 +191,38 @@ export default function RevenuePage() {
         <div className="flex gap-2 flex-wrap items-center">
           <input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <ExportButtons data={records as unknown as Record<string, unknown>[]} filename="daily-sales" />
+          <ExportButtons
+            data={records.map(r => {
+              const apps = Number(r.hungerStation) + Number(r.jahez) + Number(r.noonFood) + Number(r.talabat) + Number(r.app5) + Number(r.app6)
+              const total = Number(r.cashSales) + Number(r.cardSales) + apps
+              const vat = r.vatMode === 'EXCLUSIVE'
+                ? (total * Number(r.vatRate)) / 100
+                : (total * Number(r.vatRate)) / (100 + Number(r.vatRate))
+              const netSales = r.vatMode === 'EXCLUSIVE' ? total : total - vat
+              return {
+                'التاريخ': new Date(r.date).toLocaleDateString('en-CA'),
+                'المطعم': r.restaurant ? r.restaurant.nameAr : '',
+                'وضع الضريبة': r.vatMode === 'EXCLUSIVE' ? 'حصري' : 'شامل',
+                'مبيعات نقدية': Number(r.cashSales),
+                'مبيعات بطاقة': Number(r.cardSales),
+                'هنقر ستيشن': Number(r.hungerStation),
+                'جاهز': Number(r.jahez),
+                'نون فود': Number(r.noonFood),
+                'طلبات': Number(r.talabat),
+                'تطبيق 5': Number(r.app5),
+                'تطبيق 6': Number(r.app6),
+                'إجمالي التطبيقات': apps,
+                'إجمالي الإيرادات': total,
+                'ضريبة القيمة المضافة': Number(vat.toFixed(2)),
+                'صافي المبيعات': Number(netSales.toFixed(2)),
+                'رصيد الافتتاح': Number(r.openingBalance),
+                'مصاريف نقدية': Number(r.cashExpenses),
+                'رصيد الختام': Number(r.closingBalance),
+                'ملاحظات': r.notes || '',
+              }
+            })}
+            filename="daily-sales"
+          />
           <Button onClick={openAdd} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة سجل يومي' : 'Add Daily Record'}
           </Button>

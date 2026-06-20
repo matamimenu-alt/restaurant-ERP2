@@ -124,7 +124,20 @@ export default function ExpensesPage() {
               <Upload className="h-4 w-4" />{lang === 'ar' ? 'استيراد Excel' : 'Import Excel'}
             </Button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { if (e.target.files?.[0]) { importMutation.mutate(e.target.files[0]); e.target.value = '' } }} />
-            <ExportButtons data={expenses} filename="expenses" />
+            <ExportButtons
+              data={expenses.map((e: Record<string, unknown>) => ({
+                'التاريخ': new Date(e.date as string).toLocaleDateString('en-CA'),
+                'الوصف': e.description || '',
+                'التصنيف': (e.category as {nameAr?: string} | undefined)?.nameAr || '',
+                'المبلغ': Number(e.amount),
+                'ضريبة القيمة المضافة': Number(e.vatAmount || 0),
+                'الإجمالي': Number(e.amount) + Number(e.vatAmount || 0),
+                'طريقة الدفع': e.paymentMethod === 'CASH' ? 'نقد' : e.paymentMethod === 'BANK' ? 'بطاقة' : 'آجل',
+                'خاضع للضريبة': e.isVatable ? 'نعم' : 'لا',
+                'ملاحظات': e.notes || '',
+              }))}
+              filename="expenses"
+            />
             <Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة مصروف' : 'Add Expense'}</Button>
           </div>
         }
