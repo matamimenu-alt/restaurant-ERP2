@@ -59,7 +59,8 @@ export const getExpenseCategories = async (req: AuthRequest, res: Response) => {
   try {
     const categories = await prisma.expenseCategory.findMany({
       where: { companyId: req.user!.companyId },
-      include: { children: true },
+      include: { children: true, _count: { select: { expenses: true } } },
+      orderBy: { nameAr: 'asc' },
     });
     sendSuccess(res, categories);
   } catch { sendError(res, 'Failed to fetch categories', 500); }

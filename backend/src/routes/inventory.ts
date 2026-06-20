@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getItems, getItem, createItem, updateItem, deleteItem, getCategories, createStockMovement, getStockMovements, getLowStockItems, createPhysicalCount, completePhysicalCount } from '../controllers/inventoryController';
+import { getItems, getItem, createItem, updateItem, deleteItem, getCategories, createCategory, updateCategory, deleteCategory, createStockMovement, getStockMovements, getLowStockItems, createPhysicalCount, completePhysicalCount } from '../controllers/inventoryController';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -11,6 +11,9 @@ router.post('/items', createItem);
 router.put('/items/:id', updateItem);
 router.delete('/items/:id', deleteItem);
 router.get('/categories', getCategories);
+router.post('/categories', createCategory);
+router.put('/categories/:id', updateCategory);
+router.delete('/categories/:id', deleteCategory);
 router.get('/movements', getStockMovements);
 router.post('/movements', createStockMovement);
 router.post('/physical-counts', createPhysicalCount);
