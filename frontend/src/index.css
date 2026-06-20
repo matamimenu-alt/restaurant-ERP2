@@ -89,3 +89,40 @@ html[dir="rtl"] .lucide {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-muted-foreground/50;
 }
+
+/* ─── Print / PDF Styles ──────────────────────────────────────────── */
+@media print {
+  /* Hide nav/sidebar/header */
+  aside, nav, [data-sidebar], header,
+  .no-print, button, [role="navigation"] {
+    display: none !important;
+  }
+
+  /* Reset layout for print */
+  body {
+    background: white !important;
+    font-size: 11pt;
+  }
+
+  main, #root > div > main {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Keep table borders visible */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 10pt; }
+  thead { background-color: #f5f5f5 !important; -webkit-print-color-adjust: exact; }
+
+  /* Avoid page breaks inside rows */
+  tr { page-break-inside: avoid; }
+
+  /* Summary cards */
+  .print-card { border: 1px solid #ddd; padding: 8px; margin-bottom: 8px; }
+
+  @page {
+    margin: 1.5cm;
+    size: A4 landscape;
+  }
+}

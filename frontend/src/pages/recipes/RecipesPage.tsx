@@ -6,6 +6,7 @@ import PageHeader from '@/components/shared/PageHeader'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import EmptyState from '@/components/shared/EmptyState'
 import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
+import ExportButtons from '@/components/shared/ExportButtons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -62,7 +63,7 @@ export default function RecipesPage() {
     <div className="space-y-6">
       <PageHeader
         title={lang === 'ar' ? 'الوصفات' : 'Recipes'}
-        actions={<Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'وصفة جديدة' : 'New Recipe'}</Button>}
+        actions={<div className="flex gap-2"><ExportButtons data={recipes} filename="recipes" /><Button onClick={openAdd} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'وصفة جديدة' : 'New Recipe'}</Button></div>}
       />
 
       {isLoading ? <LoadingSpinner /> : recipes.length === 0 ? (

@@ -14,12 +14,13 @@ export const sendPaginated = (
   total: number,
   page: number,
   limit: number,
-  message = 'Success'
+  extras: Record<string, unknown> = {}
 ) => {
   res.status(200).json({
     success: true,
-    message,
+    message: 'Success',
     data,
     pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+    ...extras,
   });
 };

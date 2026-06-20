@@ -115,6 +115,7 @@ model Company {
   inventoryItems  InventoryItem[]
   inventoryCategories InventoryCategory[]
   revenueEntries  RevenueEntry[]
+  dailySalesRecords DailySalesRecord[]
   purchaseInvoices PurchaseInvoice[]
   purchaseReturns PurchaseReturn[]
   expenses        Expense[]
@@ -194,6 +195,7 @@ model Restaurant {
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   branches        Branch[]
   revenueEntries  RevenueEntry[]
+  dailySalesRecords DailySalesRecord[]
   purchaseInvoices PurchaseInvoice[]
   expenses        Expense[]
   employees       Employee[]
@@ -219,13 +221,14 @@ model Branch {
 
   restaurant       Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   manager          User?             @relation("BranchManager", fields: [managerId], references: [id])
-  revenueEntries   RevenueEntry[]
-  purchaseInvoices PurchaseInvoice[]
-  expenses         Expense[]
-  employees        Employee[]
+  revenueEntries    RevenueEntry[]
+  dailySalesRecords DailySalesRecord[]
+  purchaseInvoices  PurchaseInvoice[]
+  expenses          Expense[]
+  employees         Employee[]
   inventoryLocations InventoryLocation[]
-  stockMovements   StockMovement[]
-  physicalCounts   PhysicalCount[]
+  stockMovements    StockMovement[]
+  physicalCounts    PhysicalCount[]
 
   @@map("branches")
 }
@@ -392,6 +395,37 @@ model RevenueEntry {
   branch     Branch?    @relation(fields: [branchId], references: [id])
 
   @@map("revenue_entries")
+}
+
+model DailySalesRecord {
+  id             String   @id @default(cuid())
+  companyId      String
+  restaurantId   String
+  branchId       String?
+  date           DateTime
+  vatMode        String   @default("INCLUSIVE")
+  vatRate        Decimal  @default(15) @db.Decimal(5, 2)
+  cashSales      Decimal  @default(0) @db.Decimal(15, 2)
+  cardSales      Decimal  @default(0) @db.Decimal(15, 2)
+  hungerStation  Decimal  @default(0) @db.Decimal(15, 2)
+  jahez          Decimal  @default(0) @db.Decimal(15, 2)
+  noonFood       Decimal  @default(0) @db.Decimal(15, 2)
+  talabat        Decimal  @default(0) @db.Decimal(15, 2)
+  app5           Decimal  @default(0) @db.Decimal(15, 2)
+  app6           Decimal  @default(0) @db.Decimal(15, 2)
+  openingBalance Decimal  @default(0) @db.Decimal(15, 2)
+  cashExpenses   Decimal  @default(0) @db.Decimal(15, 2)
+  closingBalance Decimal  @default(0) @db.Decimal(15, 2)
+  notes          String?
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch?    @relation(fields: [branchId], references: [id])
+
+  @@map("daily_sales_records")
 }
 
 // ─── PURCHASING ───────────────────────────────────────────────────────────────

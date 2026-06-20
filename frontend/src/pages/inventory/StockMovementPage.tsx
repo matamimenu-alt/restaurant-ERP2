@@ -5,6 +5,7 @@ import { useLang } from '@/hooks/useLang'
 import PageHeader from '@/components/shared/PageHeader'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
+import ExportButtons from '@/components/shared/ExportButtons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -46,7 +47,7 @@ export default function StockMovementPage() {
     <div className="space-y-6">
       <PageHeader
         title={lang === 'ar' ? 'حركة المخزون' : 'Stock Movements'}
-        actions={<Button onClick={() => { reset(); setOpen(true) }} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'حركة جديدة' : 'New Movement'}</Button>}
+        actions={<div className="flex gap-2"><ExportButtons data={movements} filename="stock-movements" /><Button onClick={() => { reset(); setOpen(true) }} className="gap-2"><Plus className="h-4 w-4" />{lang === 'ar' ? 'حركة جديدة' : 'New Movement'}</Button></div>}
       />
 
       {isLoading ? <LoadingSpinner /> : (
