@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
@@ -13,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Pencil, Trash2, BarChart3, Calendar, Settings } from 'lucide-react'
+import { Plus, Pencil, Trash2, BarChart3, Calendar, Settings, Upload, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, Controller } from 'react-hook-form'
 
@@ -39,6 +40,77 @@ type DailyRecord = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormValues = Record<string, any>
+
+type ImportRow = {
+  date: string
+  vatMode: string
+  cashSales: number
+  cardSales: number
+  hungerStation: number
+  jahez: number
+  noonFood: number
+  talabat: number
+  app5: number
+  app6: number
+  openingBalance: number
+  cashExpenses: number
+  closingBalance: number
+  notes: string
+  total: number
+  _raw: Record<string, unknown>
+}
+
+function parseExcelDate(val: unknown): string {
+  if (!val) return ''
+  if (typeof val === 'number') {
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000))
+    return d.toISOString().split('T')[0]
+  }
+  const s = String(val)
+  const d = new Date(s)
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+  return s
+}
+
+function parseImportFile(file: File): Promise<ImportRow[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result
+        const wb = XLSX.read(data, { type: 'array' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]
+        const parsed: ImportRow[] = rows.map(row => {
+          const n = (k: string) => Number(row[k] || row[k.toLowerCase()] || 0) || 0
+          const cash = n('Cash (SAR)') || n('Cash') || n('نقد') || 0
+          const card = n('Card (SAR)') || n('Card') || n('بطاقة') || 0
+          const hs = n('HungerStation') || n('Hunger Station') || n('هنقر ستيشن') || 0
+          const jh = n('Jahez') || n('جاهز') || 0
+          const nf = n('Noon Food') || n('NoonFood') || n('نون فود') || 0
+          const tl = n('Talabat') || n('طلبات') || 0
+          const a5 = n('App 5') || n('App5') || n('تطبيق 5') || 0
+          const a6 = n('App 6') || n('App6') || n('تطبيق 6') || 0
+          const ob = n('Opening Balance (SAR)') || n('Opening Balance') || n('رصيد الافتتاح') || 0
+          const ce = n('Cash Expenses (SAR)') || n('Cash Expenses') || n('مصاريف نقدية') || 0
+          const cb = n('Closing Balance (SAR)') || n('Closing Balance') || n('رصيد الختام') || 0
+          const vatModeRaw = String(row['VAT Mode'] || row['وضع الضريبة'] || 'inclusive').toLowerCase()
+          const vatMode = vatModeRaw === 'exclusive' ? 'EXCLUSIVE' : 'INCLUSIVE'
+          const notes = String(row['Notes'] || row['ملاحظات'] || '')
+          const dateKey = row['Date'] || row['التاريخ'] || row['date']
+          const date = parseExcelDate(dateKey)
+          const apps = hs + jh + nf + tl + a5 + a6
+          return { date, vatMode, cashSales: cash, cardSales: card, hungerStation: hs, jahez: jh, noonFood: nf, talabat: tl, app5: a5, app6: a6, openingBalance: ob, cashExpenses: ce, closingBalance: cb, notes, total: cash + card + apps, _raw: row }
+        }).filter(r => r.date && r.date.length === 10)
+        resolve(parsed)
+      } catch (err) {
+        reject(err)
+      }
+    }
+    reader.onerror = reject
+    reader.readAsArrayBuffer(file)
+  })
+}
 
 function SummaryCard({ label, value, sub, dark }: { label: string; value: number; sub?: string; dark?: boolean }) {
   return (
@@ -76,6 +148,12 @@ export default function RevenuePage() {
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<DailyRecord | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importRows, setImportRows] = useState<ImportRow[]>([])
+  const [importRestaurantId, setImportRestaurantId] = useState('')
+  const [importStatus, setImportStatus] = useState<'idle' | 'importing' | 'done'>('idle')
+  const [importResults, setImportResults] = useState<{ success: number; errors: string[] }>({ success: 0, errors: [] })
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [monthFilter, setMonthFilter] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -136,6 +214,47 @@ export default function RevenuePage() {
       toast({ title: lang === 'ar' ? 'تم الحذف' : 'Deleted' })
     },
   })
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const rows = await parseImportFile(file)
+      setImportRows(rows)
+      setImportStatus('idle')
+      setImportResults({ success: 0, errors: [] })
+    } catch {
+      toast({ title: lang === 'ar' ? 'خطأ في قراءة الملف' : 'Error reading file', variant: 'destructive' })
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const runImport = async () => {
+    if (!importRestaurantId) {
+      toast({ title: lang === 'ar' ? 'يرجى اختيار المطعم' : 'Please select a restaurant', variant: 'destructive' })
+      return
+    }
+    setImportStatus('importing')
+    const errors: string[] = []
+    let success = 0
+    for (const row of importRows) {
+      try {
+        await api.post('/api/v1/daily-sales', {
+          ...row,
+          vatRate: 15,
+          restaurantId: importRestaurantId,
+          createdBy: 'excel-import',
+        })
+        success++
+      } catch (err: unknown) {
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || String(err)
+        errors.push(`${row.date}: ${msg}`)
+      }
+    }
+    setImportResults({ success, errors })
+    setImportStatus('done')
+    if (success > 0) qc.invalidateQueries({ queryKey: ['daily-sales'] })
+  }
 
   const openAdd = () => {
     setEditing(null)
@@ -223,6 +342,9 @@ export default function RevenuePage() {
             })}
             filename="daily-sales"
           />
+          <Button variant="outline" onClick={() => { setImportRows([]); setImportStatus('idle'); setImportResults({ success: 0, errors: [] }); setImportOpen(true) }} className="gap-2 border-green-200 text-green-700 hover:bg-green-50">
+            <Upload className="h-4 w-4" />{lang === 'ar' ? 'استيراد Excel' : 'Import Excel'}
+          </Button>
           <Button onClick={openAdd} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة سجل يومي' : 'Add Daily Record'}
           </Button>
@@ -331,6 +453,142 @@ export default function RevenuePage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Import Dialog */}
+      <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileSelect} />
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold flex items-center gap-2">
+              <Upload className="h-4 w-4 text-green-600" />
+              {lang === 'ar' ? 'استيراد سجلات المبيعات من Excel' : 'Import Sales Records from Excel'}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Template info */}
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-700">
+              <p className="font-semibold mb-1">{lang === 'ar' ? 'أعمدة Excel المطلوبة:' : 'Required Excel columns:'}</p>
+              <p className="text-blue-600">Date, Cash (SAR), Card (SAR), HungerStation, Jahez, Noon Food, Talabat, App 5, App 6, Opening Balance (SAR), Cash Expenses (SAR), Closing Balance (SAR), Notes, VAT Mode</p>
+            </div>
+
+            {/* Restaurant selector */}
+            {Array.isArray(restaurants) && restaurants.length > 0 && (
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">{lang === 'ar' ? 'المطعم' : 'Restaurant'} <span className="text-red-500">*</span></Label>
+                <Select value={importRestaurantId} onValueChange={setImportRestaurantId}>
+                  <SelectTrigger className="w-64">
+                    <SelectValue placeholder={lang === 'ar' ? 'اختر المطعم' : 'Select restaurant'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(restaurants as { id: string; nameAr: string; nameEn: string }[]).map(r => (
+                      <SelectItem key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* File selector */}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2">
+                <Upload className="h-4 w-4" />{lang === 'ar' ? 'اختر ملف Excel' : 'Choose Excel File'}
+              </Button>
+              {importRows.length > 0 && (
+                <span className="flex items-center text-sm text-green-600 font-medium">
+                  <CheckCircle className="h-4 w-4 mr-1" />
+                  {importRows.length} {lang === 'ar' ? 'سجل جاهز للاستيراد' : 'records ready to import'}
+                </span>
+              )}
+            </div>
+
+            {/* Preview table */}
+            {importRows.length > 0 && importStatus !== 'done' && (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">
+                  {lang === 'ar' ? 'معاينة البيانات' : 'Data Preview'} ({importRows.length} {lang === 'ar' ? 'سجل' : 'records'})
+                </div>
+                <div className="overflow-x-auto max-h-64">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
+                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'نقد' : 'Cash'}</TableHead>
+                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'بطاقة' : 'Card'}</TableHead>
+                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'التطبيقات' : 'Apps'}</TableHead>
+                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
+                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'ملاحظات' : 'Notes'}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {importRows.slice(0, 20).map((row, i) => {
+                        const apps = row.hungerStation + row.jahez + row.noonFood + row.talabat + row.app5 + row.app6
+                        return (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs font-medium">{row.date}</TableCell>
+                            <TableCell className="text-xs">{row.cashSales.toFixed(2)}</TableCell>
+                            <TableCell className="text-xs">{row.cardSales.toFixed(2)}</TableCell>
+                            <TableCell className="text-xs text-purple-600">{apps.toFixed(2)}</TableCell>
+                            <TableCell className="text-xs font-bold">{row.total.toFixed(2)}</TableCell>
+                            <TableCell className="text-xs text-gray-500">{row.notes || '—'}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                      {importRows.length > 20 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-xs text-gray-400">
+                            +{importRows.length - 20} {lang === 'ar' ? 'سجلات إضافية' : 'more records'}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+
+            {/* Results */}
+            {importStatus === 'done' && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-green-600 font-medium">
+                  <CheckCircle className="h-5 w-5" />
+                  {lang === 'ar' ? `تم استيراد ${importResults.success} سجل بنجاح` : `Successfully imported ${importResults.success} records`}
+                </div>
+                {importResults.errors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1">
+                    <p className="text-xs font-semibold text-red-600 flex items-center gap-1">
+                      <XCircle className="h-4 w-4" />
+                      {lang === 'ar' ? `${importResults.errors.length} أخطاء:` : `${importResults.errors.length} errors:`}
+                    </p>
+                    {importResults.errors.map((e, i) => (
+                      <p key={i} className="text-xs text-red-500 flex items-start gap-1">
+                        <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />{e}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setImportOpen(false)}>{lang === 'ar' ? 'إغلاق' : 'Close'}</Button>
+              {importRows.length > 0 && importStatus !== 'done' && (
+                <Button
+                  disabled={importStatus === 'importing' || !importRestaurantId}
+                  onClick={runImport}
+                  className="bg-green-600 hover:bg-green-700 text-white gap-2"
+                >
+                  {importStatus === 'importing' ? (
+                    <><LoadingSpinner />{lang === 'ar' ? 'جارٍ الاستيراد...' : 'Importing...'}</>
+                  ) : (
+                    <><Upload className="h-4 w-4" />{lang === 'ar' ? `استيراد ${importRows.length} سجل` : `Import ${importRows.length} records`}</>
+                  )}
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add/Edit Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
