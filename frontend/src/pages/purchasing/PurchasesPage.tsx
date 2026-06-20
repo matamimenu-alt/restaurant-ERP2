@@ -160,6 +160,9 @@ export default function PurchasesPage() {
 
   // Selection state (track by invoiceId)
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set())
+  const [selectAllDb, setSelectAllDb] = useState(false) // "all in DB" mode
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false)
+  const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('')
 
   // Transfer state
   const [transferOpen, setTransferOpen] = useState(false)
@@ -249,11 +252,41 @@ export default function PurchasesPage() {
     mutationFn: (ids: string[]) => api.post('/api/v1/purchases/invoices/bulk-delete', { ids }).then(r => r.data),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['purchase-lines'] })
-      setSelectedInvoiceIds(new Set())
+      qc.invalidateQueries({ queryKey: ['purchases-summary'] })
+      setSelectedInvoiceIds(new Set()); setSelectAllDb(false)
       toast({ title: lang === 'ar' ? `تم حذف ${data.data?.deleted || 0} فاتورة` : `Deleted ${data.data?.deleted || 0} invoices`, variant: 'success' })
     },
     onError: () => toast({ title: lang === 'ar' ? 'فشل الحذف' : 'Bulk delete failed', variant: 'destructive' }),
   })
+
+  const deleteAllMutation = useMutation({
+    mutationFn: () => {
+      const p = new URLSearchParams()
+      // Pass current restaurant filter if set (from axios interceptor it's auto-injected, but for delete-all we call directly)
+      return api.delete('/api/v1/purchases/invoices').then(r => r.data)
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['purchase-lines'] })
+      qc.invalidateQueries({ queryKey: ['purchases-summary'] })
+      setSelectedInvoiceIds(new Set()); setSelectAllDb(false)
+      setDeleteAllOpen(false); setDeleteAllConfirmText('')
+      toast({ title: lang === 'ar' ? `تم حذف ${data.data?.deleted || 0} فاتورة` : `Deleted ${data.data?.deleted || 0} invoices`, variant: 'success' })
+    },
+    onError: () => toast({ title: lang === 'ar' ? 'فشل حذف الكل' : 'Delete all failed', variant: 'destructive' }),
+  })
+
+  const loadAllIdsAndSelect = async () => {
+    try {
+      const p = new URLSearchParams()
+      const r = await api.get(`/api/v1/purchases/invoices/all-ids?${p}`)
+      const ids: string[] = r.data.data?.ids || []
+      setSelectedInvoiceIds(new Set(ids))
+      setSelectAllDb(true)
+      toast({ title: lang === 'ar' ? `تم تحديد ${ids.length} فاتورة` : `Selected ${ids.length} invoices` })
+    } catch {
+      toast({ title: lang === 'ar' ? 'خطأ في تحميل الفواتير' : 'Failed to load invoices', variant: 'destructive' })
+    }
+  }
 
   const transferMutation = useMutation({
     mutationFn: ({ ids, targetRestaurantId }: { ids: string[]; targetRestaurantId: string }) =>
@@ -291,6 +324,7 @@ export default function PurchasesPage() {
   }
 
   const toggleInvoice = (id: string) => {
+    setSelectAllDb(false)
     setSelectedInvoiceIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -523,11 +557,24 @@ export default function PurchasesPage() {
             </div>
           </div>
 
+          {/* Quick actions toolbar — always visible */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={loadAllIdsAndSelect} className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 text-xs">
+              ☑ {lang === 'ar' ? 'تحديد كل الفواتير في قاعدة البيانات' : 'Select ALL invoices in DB'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setDeleteAllOpen(true); setDeleteAllConfirmText('') }} className="gap-1.5 border-red-300 text-red-600 hover:bg-red-50 text-xs">
+              <Trash2 className="h-3.5 w-3.5" />
+              {lang === 'ar' ? 'حذف كل الفواتير' : 'Delete ALL Invoices'}
+            </Button>
+          </div>
+
           {/* Bulk actions bar */}
           {someSelected && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
               <span className="text-sm font-semibold text-blue-700">
-                {lang === 'ar' ? `تم تحديد ${selectedInvoiceIds.size} فاتورة` : `${selectedInvoiceIds.size} invoices selected`}
+                {selectAllDb
+                  ? (lang === 'ar' ? `✓ تم تحديد كل ${selectedInvoiceIds.size} فاتورة في قاعدة البيانات` : `✓ All ${selectedInvoiceIds.size} invoices in DB selected`)
+                  : (lang === 'ar' ? `تم تحديد ${selectedInvoiceIds.size} فاتورة` : `${selectedInvoiceIds.size} invoices selected`)}
               </span>
               <Button size="sm" variant="outline" className="gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
                 onClick={() => { setTransferTargetRestaurantId(''); setTransferOpen(true) }}>
@@ -739,6 +786,57 @@ export default function PurchasesPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Delete All Confirmation Dialog */}
+      <Dialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-5 w-5" />
+              {lang === 'ar' ? 'حذف كل الفواتير' : 'Delete ALL Invoices'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 space-y-2">
+              <p className="font-bold text-base">⚠️ {lang === 'ar' ? 'تحذير: هذا الإجراء لا يمكن التراجع عنه!' : 'Warning: This action cannot be undone!'}</p>
+              <p>{lang === 'ar'
+                ? 'سيتم حذف جميع فواتير الشراء وأصنافها للمطعم الحالي نهائياً من قاعدة البيانات.'
+                : 'All purchase invoices and their lines for the current restaurant will be permanently deleted.'}</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                {lang === 'ar' ? 'اكتب "احذف كل الفواتير" للتأكيد:' : 'Type "DELETE ALL" to confirm:'}
+              </Label>
+              <Input
+                value={deleteAllConfirmText}
+                onChange={e => setDeleteAllConfirmText(e.target.value)}
+                placeholder={lang === 'ar' ? 'احذف كل الفواتير' : 'DELETE ALL'}
+                className="border-red-300 focus:border-red-500"
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => { setDeleteAllOpen(false); setDeleteAllConfirmText('') }}>
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={
+                  deleteAllMutation.isPending ||
+                  (lang === 'ar' ? deleteAllConfirmText !== 'احذف كل الفواتير' : deleteAllConfirmText !== 'DELETE ALL')
+                }
+                onClick={() => deleteAllMutation.mutate()}
+                className="gap-2"
+              >
+                <Trash2 className="h-4 w-4" />
+                {deleteAllMutation.isPending
+                  ? (lang === 'ar' ? 'جارٍ الحذف...' : 'Deleting...')
+                  : (lang === 'ar' ? 'حذف كل الفواتير نهائياً' : 'Delete All Permanently')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Transfer Dialog */}
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>

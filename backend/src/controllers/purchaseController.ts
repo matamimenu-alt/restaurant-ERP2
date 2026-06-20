@@ -171,6 +171,34 @@ export const getPurchaseReturns = async (req: AuthRequest, res: Response) => {
   } catch { sendError(res, 'Failed to fetch returns', 500); }
 };
 
+export const deleteAllInvoices = async (req: AuthRequest, res: Response) => {
+  try {
+    const where: Prisma.PurchaseInvoiceWhereInput = { companyId: req.user!.companyId };
+    if (req.query.restaurantId) where.restaurantId = req.query.restaurantId as string;
+    const invoices = await prisma.purchaseInvoice.findMany({ where, select: { id: true } });
+    const ids = invoices.map(i => i.id);
+    if (ids.length === 0) return sendSuccess(res, { deleted: 0 });
+    await prisma.purchaseInvoiceLine.deleteMany({ where: { invoiceId: { in: ids } } });
+    const result = await prisma.purchaseInvoice.deleteMany({ where: { id: { in: ids } } });
+    sendSuccess(res, { deleted: result.count });
+  } catch (err) { console.error(err); sendError(res, 'Failed to delete all invoices', 500); }
+};
+
+export const getAllInvoiceIds = async (req: AuthRequest, res: Response) => {
+  try {
+    const where: Prisma.PurchaseInvoiceWhereInput = { companyId: req.user!.companyId };
+    if (req.query.restaurantId) where.restaurantId = req.query.restaurantId as string;
+    if (req.query.supplierId) where.supplierId = req.query.supplierId as string;
+    if (req.query.from || req.query.to) {
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(new Date(req.query.to as string).setHours(23,59,59)) : undefined;
+      where.invoiceDate = { gte: from, lte: to };
+    }
+    const invoices = await prisma.purchaseInvoice.findMany({ where, select: { id: true } });
+    sendSuccess(res, { ids: invoices.map(i => i.id), total: invoices.length });
+  } catch { sendError(res, 'Failed to get invoice ids', 500); }
+};
+
 export const bulkDeleteInvoices = async (req: AuthRequest, res: Response) => {
   try {
     const { ids } = req.body as { ids: string[] };
