@@ -661,7 +661,7 @@ model SalaryAdvance {
 model Recipe {
   id             String   @id @default(cuid())
   companyId      String
-  restaurantId   String
+  restaurantId   String?
   nameAr         String
   nameEn         String
   category       String?
@@ -672,12 +672,13 @@ model Recipe {
   foodCost       Decimal  @default(0) @db.Decimal(15, 2)
   costPerPortion Decimal  @default(0) @db.Decimal(15, 2)
   grossMargin    Decimal  @default(0) @db.Decimal(5, 2)
+  isShared       Boolean  @default(false)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
   lines      RecipeLine[]
 
   @@map("recipes")
