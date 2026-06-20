@@ -5,7 +5,7 @@ import {
   LayoutDashboard, TrendingUp, DollarSign, ShoppingCart, Package,
   UtensilsCrossed, Calculator, Receipt, Users, Building2, ChevronDown,
   Store, GitBranch, Bell, BookOpen, Banknote, BarChart3, FileText,
-  Warehouse, ClipboardList, ChefHat, Settings, X, FileInput
+  Warehouse, ClipboardList, ChefHat, Settings, X, FileInput, Tag
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -50,6 +50,7 @@ const navItems: NavItem[] = [
     labelAr: 'المصروفات', labelEn: 'Expenses', icon: Receipt,
     children: [{ labelAr: 'المصروفات', labelEn: 'Expenses', path: '/expenses', icon: Receipt }]
   },
+  { labelAr: 'إدارة التصنيفات', labelEn: 'Categories', path: '/categories', icon: Tag },
   {
     labelAr: 'الموارد البشرية والرواتب', labelEn: 'HR & Employees', icon: Users,
     children: [

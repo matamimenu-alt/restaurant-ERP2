@@ -33,6 +33,7 @@ import BranchesPage from '@/pages/setup/BranchesPage'
 import UsersPage from '@/pages/users/UsersPage'
 import AlertsPage from '@/pages/alerts/AlertsPage'
 import ImportPage from '@/pages/imports/ImportPage'
+import CategoriesPage from '@/pages/categories/CategoriesPage'
 
 export default function App() {
   return (
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="users" element={<UsersPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="imports" element={<ImportPage />} />
+        <Route path="categories" element={<CategoriesPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

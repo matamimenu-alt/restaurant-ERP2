@@ -61,9 +61,43 @@ export const deleteItem = async (req: AuthRequest, res: Response) => {
 
 export const getCategories = async (req: AuthRequest, res: Response) => {
   try {
-    const categories = await prisma.inventoryCategory.findMany({ where: { companyId: req.user!.companyId } });
+    const categories = await prisma.inventoryCategory.findMany({
+      where: { companyId: req.user!.companyId },
+      include: { _count: { select: { items: true } } },
+      orderBy: { nameAr: 'asc' },
+    });
     sendSuccess(res, categories);
   } catch { sendError(res, 'Failed to fetch categories', 500); }
+};
+
+export const createCategory = async (req: AuthRequest, res: Response) => {
+  try {
+    const { nameAr, nameEn, type } = req.body;
+    const cat = await prisma.inventoryCategory.create({
+      data: { companyId: req.user!.companyId, nameAr, nameEn, type: type || 'FOOD' },
+    });
+    sendSuccess(res, cat, 'Category created', 201);
+  } catch { sendError(res, 'Failed to create category', 500); }
+};
+
+export const updateCategory = async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.inventoryCategory.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Not found', 404);
+    const cat = await prisma.inventoryCategory.update({ where: { id: req.params.id }, data: req.body });
+    sendSuccess(res, cat);
+  } catch { sendError(res, 'Failed to update category', 500); }
+};
+
+export const deleteCategory = async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await prisma.inventoryCategory.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Not found', 404);
+    const itemCount = await prisma.inventoryItem.count({ where: { categoryId: req.params.id } });
+    if (itemCount > 0) return sendError(res, `Cannot delete: ${itemCount} items use this category`, 400);
+    await prisma.inventoryCategory.delete({ where: { id: req.params.id } });
+    sendSuccess(res, null, 'Deleted');
+  } catch { sendError(res, 'Failed to delete category', 500); }
 };
 
 export const createStockMovement = async (req: AuthRequest, res: Response) => {
