@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
@@ -12,8 +12,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ExportButtons from '@/components/shared/ExportButtons'
-import { Plus, Trash2, Receipt, Info, Upload, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Receipt, Info, Upload, CheckCircle, XCircle, AlertCircle, ArrowRightLeft, BarChart3 } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 
@@ -25,7 +26,16 @@ type PurchaseLine = {
   vatRate: number
   total: number
   item: { nameAr: string; nameEn: string; unit: string; category?: { nameAr: string; nameEn: string } }
-  invoice: { id: string; invoiceDate: string; invoiceNumber: string; invoiceType: string; paymentMethod: string; supplier: { nameAr: string; nameEn: string } }
+  invoice: {
+    id: string
+    invoiceDate: string
+    invoiceNumber: string
+    invoiceType: string
+    paymentMethod: string
+    restaurantId: string
+    supplier: { nameAr: string; nameEn: string }
+    restaurant?: { nameAr: string; nameEn: string }
+  }
 }
 
 type Summary = {
@@ -39,12 +49,25 @@ type Summary = {
   totalPurchases: number
 }
 
+type RestaurantSummary = {
+  restaurantId: string
+  nameAr: string
+  nameEn: string
+  cashTotal: number
+  cardTotal: number
+  creditTotal: number
+  taxableNet: number
+  inputVat: number
+  nonTaxableTotal: number
+  grandTotal: number
+  invoiceCount: number
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FormValues = Record<string, any>
 
 type ImportRow = {
   date: string
-  supplierId: string
   supplierName: string
   invoiceNumber: string
   invoiceType: string
@@ -95,7 +118,6 @@ function parseImportFile(file: File): Promise<ImportRow[]> {
           const invoiceType = typeRaw.includes('tax') ? 'TAX' : 'SIMPLE'
           return {
             date: parseExcelDate(row['Date'] || row['التاريخ']),
-            supplierId: '',
             supplierName: s('Supplier') || s('المورد'),
             invoiceNumber: s('Invoice ID') || s('Invoice Number') || s('رقم الفاتورة'),
             invoiceType,
@@ -130,7 +152,13 @@ export default function PurchasesPage() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [priceHistory, setPriceHistory] = useState<Record<string, unknown> | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Selection state (track by invoiceId)
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set())
+
+  // Transfer state
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferTargetRestaurantId, setTransferTargetRestaurantId] = useState('')
 
   // Import state
   const [importOpen, setImportOpen] = useState(false)
@@ -140,7 +168,11 @@ export default function PurchasesPage() {
   const [importResults, setImportResults] = useState<{ success: number; errors: string[] }>({ success: 0, errors: [] })
   const importFileRef = useRef<HTMLInputElement>(null)
 
-  const params = new URLSearchParams({ limit: '200' })
+  // Report date filter
+  const [reportFrom, setReportFrom] = useState('')
+  const [reportTo, setReportTo] = useState('')
+
+  const params = new URLSearchParams({ limit: '500' })
   if (search) params.set('search', search)
   if (selectedSupplier) params.set('supplierId', selectedSupplier)
   if (selectedCategory) params.set('categoryId', selectedCategory)
@@ -153,6 +185,16 @@ export default function PurchasesPage() {
     queryKey: ['purchase-lines', search, selectedSupplier, selectedCategory, selectedInvoiceType, paymentFilter, from, to],
     queryFn: () => api.get(`/api/v1/purchases/lines?${params}`).then(r => r.data),
   })
+
+  const summaryParams = new URLSearchParams()
+  if (reportFrom) summaryParams.set('from', reportFrom)
+  if (reportTo) summaryParams.set('to', reportTo)
+
+  const { data: summaryData } = useQuery({
+    queryKey: ['purchases-summary', reportFrom, reportTo],
+    queryFn: () => api.get(`/api/v1/purchases/summary?${summaryParams}`).then(r => r.data.data),
+  })
+
   const { data: suppliers } = useQuery({ queryKey: ['suppliers-all'], queryFn: () => api.get('/api/v1/suppliers?limit=200').then(r => r.data.data) })
   const { data: categories } = useQuery({ queryKey: ['inventory-categories'], queryFn: () => api.get('/api/v1/inventory/categories?limit=200').then(r => r.data.data) })
   const { data: restaurants } = useQuery({ queryKey: ['restaurants'], queryFn: () => api.get('/api/v1/restaurants?limit=100').then(r => r.data.data) })
@@ -198,11 +240,59 @@ export default function PurchasesPage() {
     onError: () => toast({ title: lang === 'ar' ? 'فشل الحذف' : 'Delete failed', variant: 'destructive' }),
   })
 
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => api.post('/api/v1/purchases/invoices/bulk-delete', { ids }).then(r => r.data),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['purchase-lines'] })
+      setSelectedInvoiceIds(new Set())
+      toast({ title: lang === 'ar' ? `تم حذف ${data.data?.deleted || 0} فاتورة` : `Deleted ${data.data?.deleted || 0} invoices`, variant: 'success' })
+    },
+    onError: () => toast({ title: lang === 'ar' ? 'فشل الحذف' : 'Bulk delete failed', variant: 'destructive' }),
+  })
+
+  const transferMutation = useMutation({
+    mutationFn: ({ ids, targetRestaurantId }: { ids: string[]; targetRestaurantId: string }) =>
+      api.post('/api/v1/purchases/invoices/bulk-transfer', { ids, targetRestaurantId }).then(r => r.data),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['purchase-lines'] })
+      qc.invalidateQueries({ queryKey: ['purchases-summary'] })
+      setSelectedInvoiceIds(new Set())
+      setTransferOpen(false)
+      setTransferTargetRestaurantId('')
+      toast({ title: lang === 'ar' ? `تم تحويل ${data.data?.transferred || 0} فاتورة` : `Transferred ${data.data?.transferred || 0} invoices`, variant: 'success' })
+    },
+    onError: () => toast({ title: lang === 'ar' ? 'فشل التحويل' : 'Transfer failed', variant: 'destructive' }),
+  })
+
   const lines: PurchaseLine[] = linesData?.data || []
   const summary: Summary = linesData?.summary || { taxableNet: 0, inputVat: 0, nonTaxableTotal: 0, taxableWithVat: 0, cashTotal: 0, cardTotal: 0, creditTotal: 0, totalPurchases: 0 }
 
-  // Group lines by invoice to show one delete button per invoice
-  const invoiceIds = new Set<string>()
+  // Unique invoice IDs in displayed order
+  const invoiceOrder = useMemo(() => {
+    const seen = new Set<string>()
+    const order: string[] = []
+    for (const l of lines) {
+      if (!seen.has(l.invoice.id)) { seen.add(l.invoice.id); order.push(l.invoice.id) }
+    }
+    return order
+  }, [lines])
+
+  const allSelected = invoiceOrder.length > 0 && invoiceOrder.every(id => selectedInvoiceIds.has(id))
+  const someSelected = selectedInvoiceIds.size > 0
+
+  const toggleAll = () => {
+    if (allSelected) setSelectedInvoiceIds(new Set())
+    else setSelectedInvoiceIds(new Set(invoiceOrder))
+  }
+
+  const toggleInvoice = (id: string) => {
+    setSelectedInvoiceIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const paymentBadge = (method: string) => {
     const map: Record<string, { label: string; color: string }> = {
@@ -219,25 +309,17 @@ export default function PurchasesPage() {
     if (!file) return
     try {
       const rows = await parseImportFile(file)
-      setImportRows(rows)
-      setImportStatus('idle')
-      setImportResults({ success: 0, errors: [] })
-    } catch {
-      toast({ title: lang === 'ar' ? 'خطأ في قراءة الملف' : 'Error reading file', variant: 'destructive' })
-    }
+      setImportRows(rows); setImportStatus('idle'); setImportResults({ success: 0, errors: [] })
+    } catch { toast({ title: lang === 'ar' ? 'خطأ في قراءة الملف' : 'Error reading file', variant: 'destructive' }) }
     if (importFileRef.current) importFileRef.current.value = ''
   }
 
   const runImport = async () => {
-    if (!importRestaurantId) {
-      toast({ title: lang === 'ar' ? 'يرجى اختيار المطعم' : 'Please select a restaurant', variant: 'destructive' })
-      return
-    }
+    if (!importRestaurantId) { toast({ title: lang === 'ar' ? 'يرجى اختيار المطعم' : 'Please select a restaurant', variant: 'destructive' }); return }
     setImportStatus('importing')
     const errors: string[] = []
     let success = 0
 
-    // Load current suppliers/items/categories
     const [suppRes, itemRes, catRes] = await Promise.all([
       api.get('/api/v1/suppliers?limit=500').then(r => r.data.data as { id: string; nameAr: string }[]),
       api.get('/api/v1/inventory/items?limit=1000').then(r => r.data.data as { id: string; nameAr: string; unit: string }[]),
@@ -248,23 +330,17 @@ export default function PurchasesPage() {
     const itemMap: Record<string, string> = Object.fromEntries(itemRes.map(i => [i.nameAr, i.id]))
     const catMap: Record<string, string> = Object.fromEntries([...catRes.map(c => [c.nameEn, c.id]), ...catRes.map(c => [c.nameAr, c.id])])
 
-    // Helper: get or create supplier
     const getSupplier = async (name: string): Promise<string> => {
       if (supplierMap[name]) return supplierMap[name]
       const s = await api.post('/api/v1/suppliers', { nameAr: name, nameEn: name }).then(r => r.data.data)
-      supplierMap[name] = s.id
-      return s.id
+      supplierMap[name] = s.id; return s.id
     }
-
-    // Helper: get or create item
     const getItem = async (name: string, categoryId: string | undefined, unit: string): Promise<string> => {
       if (itemMap[name]) return itemMap[name]
       const i = await api.post('/api/v1/inventory/items', { nameAr: name, nameEn: name, unit: unit || 'unit', categoryId, lastPurchasePrice: 0 }).then(r => r.data.data)
-      itemMap[name] = i.id
-      return i.id
+      itemMap[name] = i.id; return i.id
     }
 
-    // Group rows by invoiceNumber+date+supplier
     const groups: Record<string, ImportRow[]> = {}
     for (const row of importRows) {
       const key = `${row.date}__${row.supplierName}__${row.invoiceNumber}`
@@ -272,33 +348,24 @@ export default function PurchasesPage() {
       groups[key].push(row)
     }
 
-    for (const [, groupRows] of Object.entries(groups)) {
+    for (const groupRows of Object.values(groups)) {
       try {
         const first = groupRows[0]
         const supplierId = await getSupplier(first.supplierName)
         const invoiceLines = []
         let subtotalAmt = 0, vatAmt = 0
-
         for (const row of groupRows) {
           const catId = catMap[row.category] || undefined
           const itemId = await getItem(row.product, catId, row.unit)
           const net = row.quantity * row.unitPrice
-          subtotalAmt += net
-          vatAmt += row.vatAmount
+          subtotalAmt += net; vatAmt += row.vatAmount
           invoiceLines.push({ itemId, quantity: row.quantity, unitPrice: row.unitPrice, vatRate: net > 0 ? Math.round((row.vatAmount / net) * 100) : 0, vatAmount: row.vatAmount, total: net + row.vatAmount })
         }
-
         await api.post('/api/v1/purchases/invoices', {
-          restaurantId: importRestaurantId,
-          supplierId,
+          restaurantId: importRestaurantId, supplierId,
           invoiceNumber: first.invoiceNumber || `IMP-${Date.now()}`,
-          invoiceDate: first.date,
-          invoiceType: first.invoiceType,
-          paymentMethod: first.paymentMethod,
-          subtotal: subtotalAmt,
-          vatAmount: vatAmt,
-          total: subtotalAmt + vatAmt,
-          lines: invoiceLines,
+          invoiceDate: first.date, invoiceType: first.invoiceType, paymentMethod: first.paymentMethod,
+          subtotal: subtotalAmt, vatAmount: vatAmt, total: subtotalAmt + vatAmt, lines: invoiceLines,
         })
         success++
       } catch (err: unknown) {
@@ -306,11 +373,14 @@ export default function PurchasesPage() {
         errors.push(`${groupRows[0].date} ${groupRows[0].supplierName}: ${msg}`)
       }
     }
-
-    setImportResults({ success, errors })
-    setImportStatus('done')
+    setImportResults({ success, errors }); setImportStatus('done')
     if (success > 0) qc.invalidateQueries({ queryKey: ['purchase-lines'] })
   }
+
+  const invoiceSeenInTable = new Set<string>()
+
+  const byRestaurant: RestaurantSummary[] = summaryData?.byRestaurant || []
+  const totals = summaryData?.totals || { cashTotal: 0, cardTotal: 0, creditTotal: 0, taxableNet: 0, inputVat: 0, nonTaxableTotal: 0, grandTotal: 0, invoiceCount: 0 }
 
   return (
     <div className="space-y-6">
@@ -324,6 +394,7 @@ export default function PurchasesPage() {
           <ExportButtons
             data={lines.map(l => ({
               'التاريخ': new Date(l.invoice.invoiceDate).toLocaleDateString('en-CA'),
+              'المطعم': l.invoice.restaurant?.nameAr || '',
               'نوع الفاتورة': l.invoice.invoiceType === 'TAX' ? 'ضريبية' : 'بسيطة',
               'رقم الفاتورة': l.invoice.invoiceNumber,
               'المنتج': l.item.nameAr,
@@ -356,175 +427,353 @@ export default function PurchasesPage() {
         <StatCard dark label={lang === 'ar' ? 'إجمالي المشتريات' : 'TOTAL PURCHASES'} value={summary.totalPurchases} sub={`${lines.length} ${lang === 'ar' ? 'سجل' : 'records'}`} />
       </div>
 
-      {/* Filters */}
-      <div className="bg-white border rounded-xl p-4 space-y-3">
-        <div className="flex flex-wrap gap-3 items-end">
-          <div className="space-y-1">
-            <Label className="text-xs text-gray-500">{lang === 'ar' ? 'من' : 'From'}</Label>
-            <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36 text-sm" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-gray-500">{lang === 'ar' ? 'إلى' : 'To'}</Label>
-            <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-36 text-sm" />
-          </div>
-          <div className="relative flex-1 min-w-48">
-            <Input placeholder={lang === 'ar' ? 'بحث عن منتج / صنف...' : 'Search product / item...'} value={search} onChange={e => setSearch(e.target.value)} className="pl-9 text-sm" />
-            <span className="absolute left-3 top-2.5 text-gray-400 text-xs">🔍</span>
-          </div>
-          <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
-            <SelectTrigger className="w-44 text-sm"><SelectValue placeholder={lang === 'ar' ? 'كل الموردين' : 'All Suppliers'} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{lang === 'ar' ? 'كل الموردين' : 'All Suppliers'}</SelectItem>
-              {Array.isArray(suppliers) && suppliers.map((s: { id: string; nameAr: string; nameEn: string }) => (
-                <SelectItem key={s.id} value={s.id}>{lang === 'ar' ? s.nameAr : s.nameEn}</SelectItem>
+      <Tabs defaultValue="records">
+        <TabsList className="bg-white border rounded-lg p-1 gap-1">
+          <TabsTrigger value="records" className="gap-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+            <Receipt className="h-4 w-4" />{lang === 'ar' ? 'الفواتير' : 'Invoices'}
+          </TabsTrigger>
+          <TabsTrigger value="reports" className="gap-2 data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
+            <BarChart3 className="h-4 w-4" />{lang === 'ar' ? 'التقارير التجميعية' : 'Summary Reports'}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="records" className="mt-4 space-y-4">
+          {/* Filters */}
+          <div className="bg-white border rounded-xl p-4 space-y-3">
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">{lang === 'ar' ? 'من' : 'From'}</Label>
+                <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36 text-sm" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">{lang === 'ar' ? 'إلى' : 'To'}</Label>
+                <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-36 text-sm" />
+              </div>
+              <div className="relative flex-1 min-w-48">
+                <Input placeholder={lang === 'ar' ? 'بحث عن منتج / صنف...' : 'Search product / item...'} value={search} onChange={e => setSearch(e.target.value)} className="pl-9 text-sm" />
+                <span className="absolute left-3 top-2.5 text-gray-400 text-xs">🔍</span>
+              </div>
+              <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
+                <SelectTrigger className="w-44 text-sm"><SelectValue placeholder={lang === 'ar' ? 'كل الموردين' : 'All Suppliers'} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">{lang === 'ar' ? 'كل الموردين' : 'All Suppliers'}</SelectItem>
+                  {Array.isArray(suppliers) && suppliers.map((s: { id: string; nameAr: string; nameEn: string }) => (
+                    <SelectItem key={s.id} value={s.id}>{lang === 'ar' ? s.nameAr : s.nameEn}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                <SelectTrigger className="w-52 text-sm"><SelectValue placeholder={lang === 'ar' ? 'كل الفئات' : 'All Categories'} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">{lang === 'ar' ? 'كل الفئات' : 'All Categories'}</SelectItem>
+                  {Array.isArray(categories) && categories.map((c: { id: string; nameAr: string; nameEn: string }) => (
+                    <SelectItem key={c.id} value={c.id}>{lang === 'ar' ? c.nameAr : c.nameEn}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedInvoiceType} onValueChange={setSelectedInvoiceType}>
+                <SelectTrigger className="w-44 text-sm"><SelectValue placeholder={lang === 'ar' ? 'نوع الفاتورة' : 'All Invoice Types'} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">{lang === 'ar' ? 'كل الأنواع' : 'All Types'}</SelectItem>
+                  <SelectItem value="TAX">{lang === 'ar' ? 'فاتورة ضريبية' : 'Tax Invoice'}</SelectItem>
+                  <SelectItem value="SIMPLE">{lang === 'ar' ? 'فاتورة بسيطة' : 'Simple Invoice'}</SelectItem>
+                </SelectContent>
+              </Select>
+              {(from || to || search || selectedSupplier || selectedCategory || selectedInvoiceType || paymentFilter !== 'ALL') && (
+                <Button variant="ghost" size="sm" className="text-red-500" onClick={() => { setFrom(''); setTo(''); setSearch(''); setSelectedSupplier(''); setSelectedCategory(''); setSelectedInvoiceType(''); setPaymentFilter('ALL') }}>
+                  ✕ {lang === 'ar' ? 'مسح الكل' : 'Clear all'}
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {[{ key: 'ALL', en: 'All', ar: 'الكل' }, { key: 'CASH', en: 'Cash', ar: 'نقد' }, { key: 'CARD', en: 'Card', ar: 'بطاقة' }, { key: 'CREDIT', en: 'Credit', ar: 'آجل' }].map(({ key, en, ar }) => (
+                <button key={key} onClick={() => setPaymentFilter(key)}
+                  className={`px-4 py-1.5 text-xs rounded-full font-medium transition-colors ${paymentFilter === key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                  {key === 'CASH' && <span className="mr-1 text-green-600">■</span>}
+                  {key === 'CARD' && <span className="mr-1 text-blue-600">■</span>}
+                  {key === 'CREDIT' && <span className="mr-1 text-purple-400">■</span>}
+                  {lang === 'ar' ? ar : en}
+                </button>
               ))}
-            </SelectContent>
-          </Select>
-          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-            <SelectTrigger className="w-52 text-sm"><SelectValue placeholder={lang === 'ar' ? 'كل الفئات' : 'All Categories'} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{lang === 'ar' ? 'كل الفئات' : 'All Categories'}</SelectItem>
-              {Array.isArray(categories) && categories.map((c: { id: string; nameAr: string; nameEn: string }) => (
-                <SelectItem key={c.id} value={c.id}>{lang === 'ar' ? c.nameAr : c.nameEn} — {lang === 'ar' ? c.nameEn : c.nameAr}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={selectedInvoiceType} onValueChange={setSelectedInvoiceType}>
-            <SelectTrigger className="w-44 text-sm"><SelectValue placeholder={lang === 'ar' ? 'نوع الفاتورة' : 'All Invoice Types'} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">{lang === 'ar' ? 'كل الأنواع' : 'All Invoice Types'}</SelectItem>
-              <SelectItem value="TAX">{lang === 'ar' ? 'فاتورة ضريبية' : 'Tax Invoice'}</SelectItem>
-              <SelectItem value="SIMPLE">{lang === 'ar' ? 'فاتورة بسيطة' : 'Simple Invoice'}</SelectItem>
-            </SelectContent>
-          </Select>
-          {(from || to || search || selectedSupplier || selectedCategory || selectedInvoiceType || paymentFilter !== 'ALL') && (
-            <Button variant="ghost" size="sm" className="text-red-500" onClick={() => { setFrom(''); setTo(''); setSearch(''); setSelectedSupplier(''); setSelectedCategory(''); setSelectedInvoiceType(''); setPaymentFilter('ALL') }}>
-              ✕ {lang === 'ar' ? 'مسح الكل' : 'Clear all'}
-            </Button>
+            </div>
+          </div>
+
+          {/* VAT Summary Row */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white border rounded-xl p-3">
+              <p className="text-xs text-gray-500 mb-1">{lang === 'ar' ? 'الصافي الخاضع للضريبة' : 'Taxable Net'}</p>
+              <p className="font-bold text-sm">SAR {summary.taxableNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className="bg-green-50 border border-green-100 rounded-xl p-3">
+              <p className="text-xs text-green-600 mb-1">{lang === 'ar' ? 'ضريبة المدخلات' : 'Input VAT (Reclaimable)'}</p>
+              <p className="font-bold text-sm text-green-700">SAR {summary.inputVat.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3">
+              <p className="text-xs text-yellow-600 mb-1">{lang === 'ar' ? 'غير خاضعة للضريبة' : 'Non-Taxable Total'}</p>
+              <p className="font-bold text-sm text-yellow-700">SAR {summary.nonTaxableTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className="bg-white border rounded-xl p-3">
+              <p className="text-xs text-gray-500 mb-1">{lang === 'ar' ? 'الإجمالي شامل الضريبة' : 'Taxable Total (incl. VAT)'}</p>
+              <p className="font-bold text-sm">SAR {summary.taxableWithVat.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+            </div>
+          </div>
+
+          {/* Bulk actions bar */}
+          {someSelected && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+              <span className="text-sm font-semibold text-blue-700">
+                {lang === 'ar' ? `تم تحديد ${selectedInvoiceIds.size} فاتورة` : `${selectedInvoiceIds.size} invoices selected`}
+              </span>
+              <Button size="sm" variant="outline" className="gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
+                onClick={() => { setTransferTargetRestaurantId(''); setTransferOpen(true) }}>
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+                {lang === 'ar' ? 'تحويل إلى مطعم آخر' : 'Transfer to Restaurant'}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5 border-red-300 text-red-600 hover:bg-red-50"
+                onClick={() => {
+                  if (confirm(lang === 'ar' ? `حذف ${selectedInvoiceIds.size} فاتورة؟` : `Delete ${selectedInvoiceIds.size} invoices?`))
+                    bulkDeleteMutation.mutate([...selectedInvoiceIds])
+                }}>
+                <Trash2 className="h-3.5 w-3.5" />
+                {lang === 'ar' ? 'حذف المحدد' : 'Delete Selected'}
+              </Button>
+              <Button size="sm" variant="ghost" className="text-gray-500" onClick={() => setSelectedInvoiceIds(new Set())}>
+                {lang === 'ar' ? 'إلغاء التحديد' : 'Deselect All'}
+              </Button>
+            </div>
           )}
-        </div>
 
-        {/* Payment filter chips */}
-        <div className="flex gap-2">
-          {[
-            { key: 'ALL', labelEn: 'All', labelAr: 'الكل' },
-            { key: 'CASH', labelEn: 'Cash', labelAr: 'نقد' },
-            { key: 'CARD', labelEn: 'Card', labelAr: 'بطاقة' },
-            { key: 'CREDIT', labelEn: 'Credit', labelAr: 'آجل' },
-          ].map(({ key, labelEn, labelAr }) => (
-            <button
-              key={key}
-              onClick={() => setPaymentFilter(key)}
-              className={`px-4 py-1.5 text-xs rounded-full font-medium transition-colors ${paymentFilter === key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              {key === 'CASH' && <span className="mr-1 text-green-600">■</span>}
-              {key === 'CARD' && <span className="mr-1 text-blue-600">■</span>}
-              {key === 'CREDIT' && <span className="mr-1 text-purple-400">■</span>}
-              {lang === 'ar' ? labelAr : labelEn}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* VAT Summary Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-white border rounded-xl p-3">
-          <p className="text-xs text-gray-500 mb-1">{lang === 'ar' ? 'الصافي الخاضع للضريبة' : 'Taxable Net'}</p>
-          <p className="font-bold text-sm">SAR {summary.taxableNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-          <p className="text-xs text-gray-400">{lines.filter(l => l.invoice.invoiceType === 'TAX').length} {lang === 'ar' ? 'صنف ضريبي' : 'tax items'}</p>
-        </div>
-        <div className="bg-green-50 border border-green-100 rounded-xl p-3">
-          <p className="text-xs text-green-600 mb-1">{lang === 'ar' ? 'ضريبة المدخلات (قابلة الاسترداد)' : 'Input VAT (Reclaimable)'}</p>
-          <p className="font-bold text-sm text-green-700">SAR {summary.inputVat.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-          <p className="text-xs text-green-500">{lang === 'ar' ? 'من الفواتير الضريبية' : 'from tax invoices'}</p>
-        </div>
-        <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3">
-          <p className="text-xs text-yellow-600 mb-1">{lang === 'ar' ? 'إجمالي غير الخاضعة للضريبة' : 'Non-Taxable Total'}</p>
-          <p className="font-bold text-sm text-yellow-700">SAR {summary.nonTaxableTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-          <p className="text-xs text-yellow-500">{lines.filter(l => l.invoice.invoiceType !== 'TAX').length} {lang === 'ar' ? 'صنف غير ضريبي' : 'non-tax items'}</p>
-        </div>
-        <div className="bg-white border rounded-xl p-3">
-          <p className="text-xs text-gray-500 mb-1">{lang === 'ar' ? 'الإجمالي الخاضع للضريبة (شامل ضريبة القيمة المضافة)' : 'Taxable Total (incl. VAT)'}</p>
-          <p className="font-bold text-sm">SAR {summary.taxableWithVat.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-          <p className="text-xs text-gray-400">{lang === 'ar' ? 'المبلغ الإجمالي' : 'gross amount'}</p>
-        </div>
-      </div>
-
-      {/* Table */}
-      {isLoading ? <LoadingSpinner /> : lines.length === 0 ? (
-        <EmptyState title={lang === 'ar' ? 'لا توجد مشتريات' : 'No purchase records'} action={{ label: lang === 'ar' ? 'إضافة فاتورة' : 'Add Invoice', onClick: () => setOpen(true) }} icon={Receipt} />
-      ) : (
-        <div className="bg-white border rounded-xl overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-gray-50">
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الفاتورة' : 'Invoice'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'المنتج' : 'Product'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الفئة' : 'Category'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'المورد' : 'Supplier'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الدفع' : 'Payment'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الكمية' : 'Qty'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'سعر الوحدة' : 'Unit Price'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'المبلغ الصافي' : 'Net Amount'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500 text-green-600">{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
-                <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {lines.map((line) => {
-                const netAmount = Number(line.quantity) * Number(line.unitPrice)
-                const dateStr = new Date(line.invoice.invoiceDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
-                const isTax = line.invoice.invoiceType === 'TAX'
-                const invoiceId = line.invoice.id
-                const isFirstOfInvoice = !invoiceIds.has(invoiceId)
-                if (isFirstOfInvoice) invoiceIds.add(invoiceId)
-                return (
-                  <TableRow key={line.id}>
-                    <TableCell className="text-sm">{dateStr}</TableCell>
-                    <TableCell>
-                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${isTax ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {isTax ? 'Tax' : 'Simple'}
-                      </span>
-                      {line.invoice.invoiceNumber && (
-                        <div className="text-xs text-gray-400 mt-0.5 truncate max-w-[100px]">{line.invoice.invoiceNumber}</div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-sm font-medium">{lang === 'ar' ? line.item.nameAr : line.item.nameEn}</div>
-                    </TableCell>
-                    <TableCell>
-                      {line.item.category ? (
-                        <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded-full font-medium">
-                          {lang === 'ar' ? line.item.category.nameAr : line.item.category.nameEn}
-                        </span>
-                      ) : '—'}
-                    </TableCell>
-                    <TableCell className="text-sm">{lang === 'ar' ? line.invoice.supplier.nameAr : line.invoice.supplier.nameEn}</TableCell>
-                    <TableCell>{paymentBadge(line.invoice.paymentMethod)}</TableCell>
-                    <TableCell className="text-sm">{Number(line.quantity).toLocaleString()}</TableCell>
-                    <TableCell className="text-sm">SAR {Number(line.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
-                    <TableCell className="text-sm font-medium">SAR {netAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
-                    <TableCell className="text-sm text-green-600 font-medium">SAR {Number(line.vatAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
-                    <TableCell className="text-sm font-bold">SAR {Number(line.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
-                    <TableCell>
-                      {isFirstOfInvoice && (
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" title={lang === 'ar' ? 'حذف الفاتورة' : 'Delete invoice'}
-                            onClick={() => { if (confirm(lang === 'ar' ? 'حذف هذه الفاتورة وكل أصنافها؟' : 'Delete this invoice and all its lines?')) deleteMutation.mutate(invoiceId) }}>
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
+          {/* Table */}
+          {isLoading ? <LoadingSpinner /> : lines.length === 0 ? (
+            <EmptyState title={lang === 'ar' ? 'لا توجد مشتريات' : 'No purchase records'} action={{ label: lang === 'ar' ? 'إضافة فاتورة' : 'Add Invoice', onClick: () => setOpen(true) }} icon={Receipt} />
+          ) : (
+            <div className="bg-white border rounded-xl overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="w-10">
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer" />
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الفاتورة' : 'Invoice'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'المنتج' : 'Product'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الفئة' : 'Category'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'المورد' : 'Supplier'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'المطعم' : 'Restaurant'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الدفع' : 'Payment'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الكمية' : 'Qty'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'سعر الوحدة' : 'Unit Price'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الصافي' : 'Net'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500 text-green-600">{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase text-gray-500">{lang === 'ar' ? 'الإجمالي' : 'Total'}</TableHead>
+                    <TableHead className="w-10"></TableHead>
                   </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {lines.map((line) => {
+                    const netAmount = Number(line.quantity) * Number(line.unitPrice)
+                    const dateStr = new Date(line.invoice.invoiceDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+                    const isTax = line.invoice.invoiceType === 'TAX'
+                    const invoiceId = line.invoice.id
+                    const isFirst = !invoiceSeenInTable.has(invoiceId)
+                    if (isFirst) invoiceSeenInTable.add(invoiceId)
+                    const isSelected = selectedInvoiceIds.has(invoiceId)
+                    return (
+                      <TableRow key={line.id} className={isSelected ? 'bg-blue-50' : undefined}
+                        onClick={() => isFirst && toggleInvoice(invoiceId)} style={{ cursor: isFirst ? 'pointer' : undefined }}>
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          {isFirst && (
+                            <input type="checkbox" checked={isSelected} onChange={() => toggleInvoice(invoiceId)}
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer" />
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">{dateStr}</TableCell>
+                        <TableCell>
+                          <span className={`text-xs px-2 py-0.5 rounded font-medium ${isTax ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {isTax ? 'Tax' : 'Simple'}
+                          </span>
+                          {line.invoice.invoiceNumber && <div className="text-xs text-gray-400 mt-0.5 truncate max-w-[90px]">{line.invoice.invoiceNumber}</div>}
+                        </TableCell>
+                        <TableCell><div className="text-sm font-medium">{lang === 'ar' ? line.item.nameAr : line.item.nameEn}</div></TableCell>
+                        <TableCell>
+                          {line.item.category ? (
+                            <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded-full font-medium">
+                              {lang === 'ar' ? line.item.category.nameAr : line.item.category.nameEn}
+                            </span>
+                          ) : '—'}
+                        </TableCell>
+                        <TableCell className="text-sm">{lang === 'ar' ? line.invoice.supplier.nameAr : line.invoice.supplier.nameEn}</TableCell>
+                        <TableCell className="text-xs text-gray-500">{line.invoice.restaurant ? (lang === 'ar' ? line.invoice.restaurant.nameAr : line.invoice.restaurant.nameEn) : '—'}</TableCell>
+                        <TableCell>{paymentBadge(line.invoice.paymentMethod)}</TableCell>
+                        <TableCell className="text-sm">{Number(line.quantity).toLocaleString()}</TableCell>
+                        <TableCell className="text-sm">SAR {Number(line.unitPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm font-medium">SAR {netAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm text-green-600 font-medium">SAR {Number(line.vatAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm font-bold">SAR {Number(line.total).toLocaleString('en-US', { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          {isFirst && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => { if (confirm(lang === 'ar' ? 'حذف هذه الفاتورة؟' : 'Delete this invoice?')) deleteMutation.mutate(invoiceId) }}>
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Summary Reports Tab */}
+        <TabsContent value="reports" className="mt-4 space-y-4">
+          <div className="bg-white border rounded-xl p-4">
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">{lang === 'ar' ? 'من' : 'From'}</Label>
+                <Input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="w-36 text-sm" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">{lang === 'ar' ? 'إلى' : 'To'}</Label>
+                <Input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="w-36 text-sm" />
+              </div>
+              <ExportButtons
+                data={[
+                  ...byRestaurant.map(r => ({
+                    [lang === 'ar' ? 'المطعم' : 'Restaurant']: lang === 'ar' ? r.nameAr : r.nameEn,
+                    [lang === 'ar' ? 'عدد الفواتير' : 'Invoices']: r.invoiceCount,
+                    [lang === 'ar' ? 'نقد' : 'Cash']: Number(r.cashTotal.toFixed(2)),
+                    [lang === 'ar' ? 'بطاقة' : 'Card']: Number(r.cardTotal.toFixed(2)),
+                    [lang === 'ar' ? 'آجل' : 'Credit']: Number(r.creditTotal.toFixed(2)),
+                    [lang === 'ar' ? 'الصافي الخاضع للضريبة' : 'Taxable Net']: Number(r.taxableNet.toFixed(2)),
+                    [lang === 'ar' ? 'ضريبة المدخلات' : 'Input VAT']: Number(r.inputVat.toFixed(2)),
+                    [lang === 'ar' ? 'غير خاضعة' : 'Non-Taxable']: Number(r.nonTaxableTotal.toFixed(2)),
+                    [lang === 'ar' ? 'الإجمالي' : 'Grand Total']: Number(r.grandTotal.toFixed(2)),
+                  })),
+                  {
+                    [lang === 'ar' ? 'المطعم' : 'Restaurant']: lang === 'ar' ? 'الإجمالي الكلي' : 'GRAND TOTAL',
+                    [lang === 'ar' ? 'عدد الفواتير' : 'Invoices']: totals.invoiceCount,
+                    [lang === 'ar' ? 'نقد' : 'Cash']: Number(totals.cashTotal.toFixed(2)),
+                    [lang === 'ar' ? 'بطاقة' : 'Card']: Number(totals.cardTotal.toFixed(2)),
+                    [lang === 'ar' ? 'آجل' : 'Credit']: Number(totals.creditTotal.toFixed(2)),
+                    [lang === 'ar' ? 'الصافي الخاضع للضريبة' : 'Taxable Net']: Number(totals.taxableNet.toFixed(2)),
+                    [lang === 'ar' ? 'ضريبة المدخلات' : 'Input VAT']: Number(totals.inputVat.toFixed(2)),
+                    [lang === 'ar' ? 'غير خاضعة' : 'Non-Taxable']: Number(totals.nonTaxableTotal.toFixed(2)),
+                    [lang === 'ar' ? 'الإجمالي' : 'Grand Total']: Number(totals.grandTotal.toFixed(2)),
+                  }
+                ]}
+                filename="purchases-summary"
+              />
+            </div>
+          </div>
+
+          {/* Per restaurant cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {byRestaurant.map(r => (
+              <div key={r.restaurantId} className="bg-white border rounded-xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base">{lang === 'ar' ? r.nameAr : r.nameEn}</h3>
+                  <span className="text-xs text-gray-400">{r.invoiceCount} {lang === 'ar' ? 'فاتورة' : 'invoices'}</span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900">SAR {r.grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-green-50 rounded-lg p-2 text-center">
+                    <div className="text-green-600 font-medium">{lang === 'ar' ? 'نقد' : 'Cash'}</div>
+                    <div className="font-bold text-gray-800">{r.cashTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                  </div>
+                  <div className="bg-blue-50 rounded-lg p-2 text-center">
+                    <div className="text-blue-600 font-medium">{lang === 'ar' ? 'بطاقة' : 'Card'}</div>
+                    <div className="font-bold text-gray-800">{r.cardTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg p-2 text-center">
+                    <div className="text-purple-600 font-medium">{lang === 'ar' ? 'آجل' : 'Credit'}</div>
+                    <div className="font-bold text-gray-800">{r.creditTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs border-t pt-2">
+                  <div>
+                    <span className="text-gray-500">{lang === 'ar' ? 'الصافي الخاضع للضريبة: ' : 'Taxable Net: '}</span>
+                    <span className="font-medium">SAR {r.taxableNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div>
+                    <span className="text-green-600">{lang === 'ar' ? 'ضريبة المدخلات: ' : 'Input VAT: '}</span>
+                    <span className="font-medium text-green-700">SAR {r.inputVat.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Grand total row */}
+          {byRestaurant.length > 1 && (
+            <div className="bg-gray-900 text-white rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-base">{lang === 'ar' ? 'الإجمالي الكلي — جميع المطاعم' : 'GRAND TOTAL — All Restaurants'}</h3>
+                <span className="text-gray-400 text-xs">{totals.invoiceCount} {lang === 'ar' ? 'فاتورة' : 'invoices'}</span>
+              </div>
+              <div className="text-3xl font-bold mb-3">SAR {Number(totals.grandTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div><span className="text-gray-400">{lang === 'ar' ? 'نقد' : 'Cash'}: </span><span className="text-green-400 font-bold">SAR {Number(totals.cashTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+                <div><span className="text-gray-400">{lang === 'ar' ? 'بطاقة' : 'Card'}: </span><span className="text-blue-400 font-bold">SAR {Number(totals.cardTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+                <div><span className="text-gray-400">{lang === 'ar' ? 'آجل' : 'Credit'}: </span><span className="text-purple-400 font-bold">SAR {Number(totals.creditTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+                <div><span className="text-gray-400">{lang === 'ar' ? 'الصافي الخاضع للضريبة' : 'Taxable Net'}: </span><span className="font-bold">SAR {Number(totals.taxableNet).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+                <div><span className="text-gray-400">{lang === 'ar' ? 'ضريبة المدخلات' : 'Input VAT'}: </span><span className="text-green-400 font-bold">SAR {Number(totals.inputVat).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+                <div><span className="text-gray-400">{lang === 'ar' ? 'غير خاضعة' : 'Non-Taxable'}: </span><span className="font-bold">SAR {Number(totals.nonTaxableTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
+              </div>
+            </div>
+          )}
+
+          {byRestaurant.length === 0 && (
+            <div className="bg-white border rounded-xl p-12 text-center text-gray-400">
+              <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p>{lang === 'ar' ? 'لا توجد بيانات' : 'No data'}</p>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Transfer Dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4 text-purple-600" />
+              {lang === 'ar' ? 'تحويل الفواتير إلى مطعم آخر' : 'Transfer Invoices to Another Restaurant'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+              {lang === 'ar'
+                ? `سيتم تحويل ${selectedInvoiceIds.size} فاتورة إلى المطعم المحدد. لن تظهر هذه الفواتير في تقارير المطعم الأصلي الشهرية.`
+                : `${selectedInvoiceIds.size} invoices will be moved to the selected restaurant and removed from the source restaurant's monthly reports.`}
+            </div>
+            <div className="space-y-1.5">
+              <Label>{lang === 'ar' ? 'المطعم المستهدف' : 'Target Restaurant'} <span className="text-red-500">*</span></Label>
+              <Select value={transferTargetRestaurantId} onValueChange={setTransferTargetRestaurantId}>
+                <SelectTrigger><SelectValue placeholder={lang === 'ar' ? 'اختر المطعم' : 'Select restaurant'} /></SelectTrigger>
+                <SelectContent>
+                  {Array.isArray(restaurants) && (restaurants as { id: string; nameAr: string; nameEn: string }[]).map(r => (
+                    <SelectItem key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setTransferOpen(false)}>{lang === 'ar' ? 'إلغاء' : 'Cancel'}</Button>
+              <Button
+                disabled={!transferTargetRestaurantId || transferMutation.isPending}
+                onClick={() => transferMutation.mutate({ ids: [...selectedInvoiceIds], targetRestaurantId: transferTargetRestaurantId })}
+                className="bg-purple-600 hover:bg-purple-700 text-white gap-2">
+                <ArrowRightLeft className="h-4 w-4" />
+                {lang === 'ar' ? `تحويل ${selectedInvoiceIds.size} فاتورة` : `Transfer ${selectedInvoiceIds.size} invoices`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Import Dialog */}
       <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileSelect} />
@@ -536,20 +785,16 @@ export default function PurchasesPage() {
               {lang === 'ar' ? 'استيراد فواتير المشتريات من Excel' : 'Import Purchase Invoices from Excel'}
             </DialogTitle>
           </DialogHeader>
-
           <div className="space-y-4">
             <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs text-blue-700">
               <p className="font-semibold mb-1">{lang === 'ar' ? 'أعمدة Excel المطلوبة:' : 'Required Excel columns:'}</p>
               <p className="text-blue-600">Date, Supplier, Invoice ID, Invoice Type (Tax/Simple), Payment (Cash/Bank/Credit), Product, Category, Unit, Quantity, Unit Price (SAR), VAT (SAR)</p>
             </div>
-
             {Array.isArray(restaurants) && restaurants.length > 0 && (
               <div className="space-y-1">
                 <Label className="text-xs font-medium">{lang === 'ar' ? 'المطعم' : 'Restaurant'} <span className="text-red-500">*</span></Label>
                 <Select value={importRestaurantId} onValueChange={setImportRestaurantId}>
-                  <SelectTrigger className="w-64">
-                    <SelectValue placeholder={lang === 'ar' ? 'اختر المطعم' : 'Select restaurant'} />
-                  </SelectTrigger>
+                  <SelectTrigger className="w-64"><SelectValue placeholder={lang === 'ar' ? 'اختر المطعم' : 'Select restaurant'} /></SelectTrigger>
                   <SelectContent>
                     {(restaurants as { id: string; nameAr: string; nameEn: string }[]).map(r => (
                       <SelectItem key={r.id} value={r.id}>{lang === 'ar' ? r.nameAr : r.nameEn}</SelectItem>
@@ -558,7 +803,6 @@ export default function PurchasesPage() {
                 </Select>
               </div>
             )}
-
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => importFileRef.current?.click()} className="gap-2">
                 <Upload className="h-4 w-4" />{lang === 'ar' ? 'اختر ملف Excel' : 'Choose Excel File'}
@@ -566,88 +810,61 @@ export default function PurchasesPage() {
               {importRows.length > 0 && (
                 <span className="flex items-center text-sm text-green-600 font-medium">
                   <CheckCircle className="h-4 w-4 mr-1" />
-                  {importRows.length} {lang === 'ar' ? 'صنف جاهز للاستيراد' : 'lines ready to import'}
+                  {importRows.length} {lang === 'ar' ? 'صنف جاهز' : 'lines ready'}
                 </span>
               )}
             </div>
-
             {importRows.length > 0 && importStatus !== 'done' && (
               <div className="border rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">
-                  {lang === 'ar' ? 'معاينة البيانات' : 'Data Preview'} ({importRows.length} {lang === 'ar' ? 'صنف' : 'lines'})
-                </div>
-                <div className="overflow-x-auto max-h-64">
+                <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">{lang === 'ar' ? 'معاينة' : 'Preview'} ({importRows.length})</div>
+                <div className="overflow-x-auto max-h-52">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-gray-50">
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'المورد' : 'Supplier'}</TableHead>
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'الفاتورة' : 'Invoice'}</TableHead>
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'المنتج' : 'Product'}</TableHead>
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'الكمية' : 'Qty'}</TableHead>
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'السعر' : 'Price'}</TableHead>
-                        <TableHead className="text-xs whitespace-nowrap">{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
+                        <TableHead className="text-xs">{lang === 'ar' ? 'التاريخ' : 'Date'}</TableHead>
+                        <TableHead className="text-xs">{lang === 'ar' ? 'المورد' : 'Supplier'}</TableHead>
+                        <TableHead className="text-xs">{lang === 'ar' ? 'المنتج' : 'Product'}</TableHead>
+                        <TableHead className="text-xs">{lang === 'ar' ? 'الكمية' : 'Qty'}</TableHead>
+                        <TableHead className="text-xs">{lang === 'ar' ? 'السعر' : 'Price'}</TableHead>
+                        <TableHead className="text-xs">{lang === 'ar' ? 'الضريبة' : 'VAT'}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {importRows.slice(0, 20).map((row, i) => (
+                      {importRows.slice(0, 15).map((row, i) => (
                         <TableRow key={i}>
-                          <TableCell className="text-xs font-medium">{row.date}</TableCell>
+                          <TableCell className="text-xs">{row.date}</TableCell>
                           <TableCell className="text-xs">{row.supplierName}</TableCell>
-                          <TableCell className="text-xs text-gray-500">{row.invoiceNumber}</TableCell>
                           <TableCell className="text-xs">{row.product}</TableCell>
                           <TableCell className="text-xs">{row.quantity}</TableCell>
                           <TableCell className="text-xs">{row.unitPrice.toFixed(2)}</TableCell>
                           <TableCell className="text-xs text-green-600">{row.vatAmount.toFixed(2)}</TableCell>
                         </TableRow>
                       ))}
-                      {importRows.length > 20 && (
-                        <TableRow>
-                          <TableCell colSpan={7} className="text-center text-xs text-gray-400">
-                            +{importRows.length - 20} {lang === 'ar' ? 'أصناف إضافية' : 'more lines'}
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      {importRows.length > 15 && <TableRow><TableCell colSpan={6} className="text-center text-xs text-gray-400">+{importRows.length - 15} {lang === 'ar' ? 'أصناف' : 'more'}</TableCell></TableRow>}
                     </TableBody>
                   </Table>
                 </div>
               </div>
             )}
-
             {importStatus === 'done' && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-green-600 font-medium">
                   <CheckCircle className="h-5 w-5" />
-                  {lang === 'ar' ? `تم استيراد ${importResults.success} فاتورة بنجاح` : `Successfully imported ${importResults.success} invoices`}
+                  {lang === 'ar' ? `تم استيراد ${importResults.success} فاتورة` : `Imported ${importResults.success} invoices`}
                 </div>
                 {importResults.errors.length > 0 && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1">
-                    <p className="text-xs font-semibold text-red-600 flex items-center gap-1">
-                      <XCircle className="h-4 w-4" />{importResults.errors.length} {lang === 'ar' ? 'أخطاء:' : 'errors:'}
-                    </p>
-                    {importResults.errors.map((e, i) => (
-                      <p key={i} className="text-xs text-red-500 flex items-start gap-1">
-                        <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />{e}
-                      </p>
-                    ))}
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1 max-h-32 overflow-y-auto">
+                    <p className="text-xs font-semibold text-red-600 flex items-center gap-1"><XCircle className="h-4 w-4" />{importResults.errors.length} {lang === 'ar' ? 'أخطاء' : 'errors'}</p>
+                    {importResults.errors.map((e, i) => <p key={i} className="text-xs text-red-500 flex items-start gap-1"><AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />{e}</p>)}
                   </div>
                 )}
               </div>
             )}
-
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setImportOpen(false)}>{lang === 'ar' ? 'إغلاق' : 'Close'}</Button>
+              <Button variant="outline" onClick={() => setImportOpen(false)}>{lang === 'ar' ? 'إغلاق' : 'Close'}</Button>
               {importRows.length > 0 && importStatus !== 'done' && (
-                <Button
-                  disabled={importStatus === 'importing' || !importRestaurantId}
-                  onClick={runImport}
-                  className="bg-green-600 hover:bg-green-700 text-white gap-2"
-                >
-                  {importStatus === 'importing' ? (
-                    <><LoadingSpinner />{lang === 'ar' ? 'جارٍ الاستيراد...' : 'Importing...'}</>
-                  ) : (
-                    <><Upload className="h-4 w-4" />{lang === 'ar' ? `استيراد ${importRows.length} صنف` : `Import ${importRows.length} lines`}</>
-                  )}
+                <Button disabled={importStatus === 'importing' || !importRestaurantId} onClick={runImport} className="bg-green-600 hover:bg-green-700 text-white gap-2">
+                  {importStatus === 'importing' ? <><LoadingSpinner />{lang === 'ar' ? 'جارٍ الاستيراد...' : 'Importing...'}</> : <><Upload className="h-4 w-4" />{lang === 'ar' ? `استيراد ${importRows.length} صنف` : `Import ${importRows.length} lines`}</>}
                 </Button>
               )}
             </div>
@@ -723,8 +940,6 @@ export default function PurchasesPage() {
                 )} />
               </div>
             </div>
-
-            {/* Lines */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-base font-semibold">{lang === 'ar' ? 'أصناف الفاتورة' : 'Invoice Lines'}</Label>
@@ -753,7 +968,7 @@ export default function PurchasesPage() {
                       <Input type="number" step="0.001" className="h-8 text-xs" {...register(`lines.${index}.quantity`, { valueAsNumber: true })} />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">{lang === 'ar' ? 'السعر (قبل الضريبة)' : 'Unit Price (ex-VAT)'}</Label>
+                      <Label className="text-xs">{lang === 'ar' ? 'السعر' : 'Unit Price'}</Label>
                       <Input type="number" step="0.01" className="h-8 text-xs" {...register(`lines.${index}.unitPrice`, { valueAsNumber: true })} />
                     </div>
                     <div className="flex items-end gap-1">
@@ -767,7 +982,6 @@ export default function PurchasesPage() {
                 ))}
               </div>
             </div>
-
             {priceHistory && (
               <Card className="bg-blue-50 border-blue-200">
                 <CardContent className="p-3">
@@ -784,7 +998,6 @@ export default function PurchasesPage() {
                 </CardContent>
               </Card>
             )}
-
             <div className="flex justify-end">
               <div className="space-y-1 w-64 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">{lang === 'ar' ? 'المجموع' : 'Subtotal'}:</span><span>SAR {subtotal.toFixed(2)}</span></div>
@@ -792,7 +1005,6 @@ export default function PurchasesPage() {
                 <div className="flex justify-between font-bold text-base border-t pt-1"><span>{lang === 'ar' ? 'الإجمالي' : 'Total'}:</span><span>SAR {total.toFixed(2)}</span></div>
               </div>
             </div>
-
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>{lang === 'ar' ? 'إلغاء' : 'Cancel'}</Button>
               <Button type="submit" disabled={createMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">{lang === 'ar' ? 'حفظ الفاتورة' : 'Save Invoice'}</Button>

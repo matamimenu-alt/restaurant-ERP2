@@ -171,6 +171,96 @@ export const getPurchaseReturns = async (req: AuthRequest, res: Response) => {
   } catch { sendError(res, 'Failed to fetch returns', 500); }
 };
 
+export const bulkDeleteInvoices = async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body as { ids: string[] };
+    if (!ids || !ids.length) return sendError(res, 'No ids provided', 400);
+    const invoices = await prisma.purchaseInvoice.findMany({ where: { id: { in: ids }, companyId: req.user!.companyId }, select: { id: true } });
+    const validIds = invoices.map(i => i.id);
+    await prisma.purchaseInvoiceLine.deleteMany({ where: { invoiceId: { in: validIds } } });
+    await prisma.purchaseInvoice.deleteMany({ where: { id: { in: validIds } } });
+    sendSuccess(res, { deleted: validIds.length });
+  } catch { sendError(res, 'Failed to bulk delete', 500); }
+};
+
+export const transferInvoices = async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, targetRestaurantId } = req.body as { ids: string[]; targetRestaurantId: string };
+    if (!ids || !ids.length || !targetRestaurantId) return sendError(res, 'Missing ids or targetRestaurantId', 400);
+    const restaurant = await prisma.restaurant.findFirst({ where: { id: targetRestaurantId, companyId: req.user!.companyId } });
+    if (!restaurant) return sendError(res, 'Target restaurant not found', 404);
+    await prisma.purchaseInvoice.updateMany({
+      where: { id: { in: ids }, companyId: req.user!.companyId },
+      data: { restaurantId: targetRestaurantId },
+    });
+    sendSuccess(res, { transferred: ids.length, toRestaurant: restaurant.nameAr });
+  } catch { sendError(res, 'Failed to transfer invoices', 500); }
+};
+
+export const getPurchaseSummaryByRestaurant = async (req: AuthRequest, res: Response) => {
+  try {
+    const from = req.query.from ? new Date(req.query.from as string) : undefined;
+    const to = req.query.to ? new Date(req.query.to as string) : undefined;
+    const where: Prisma.PurchaseInvoiceWhereInput = { companyId: req.user!.companyId };
+    if (from || to) where.invoiceDate = { gte: from, lte: to ? new Date(new Date(to as string).setHours(23, 59, 59)) : undefined };
+
+    const invoices = await prisma.purchaseInvoice.findMany({
+      where,
+      select: {
+        restaurantId: true,
+        restaurant: { select: { nameAr: true, nameEn: true } },
+        paymentMethod: true,
+        invoiceType: true,
+        subtotal: true,
+        vatAmount: true,
+        total: true,
+      },
+    });
+
+    const byRestaurant: Record<string, {
+      restaurantId: string; nameAr: string; nameEn: string;
+      cashTotal: number; cardTotal: number; creditTotal: number;
+      taxableNet: number; inputVat: number; nonTaxableTotal: number; grandTotal: number;
+      invoiceCount: number;
+    }> = {};
+
+    for (const inv of invoices) {
+      const rid = inv.restaurantId || '__none__';
+      if (!byRestaurant[rid]) {
+        byRestaurant[rid] = {
+          restaurantId: rid,
+          nameAr: inv.restaurant?.nameAr || 'غير محدد',
+          nameEn: inv.restaurant?.nameEn || 'Unassigned',
+          cashTotal: 0, cardTotal: 0, creditTotal: 0,
+          taxableNet: 0, inputVat: 0, nonTaxableTotal: 0, grandTotal: 0, invoiceCount: 0,
+        };
+      }
+      const r = byRestaurant[rid];
+      r.invoiceCount++;
+      r.grandTotal += Number(inv.total);
+      if (inv.paymentMethod === 'CASH') r.cashTotal += Number(inv.total);
+      else if (inv.paymentMethod === 'BANK') r.cardTotal += Number(inv.total);
+      else r.creditTotal += Number(inv.total);
+      if (inv.invoiceType === 'TAX') { r.taxableNet += Number(inv.subtotal); r.inputVat += Number(inv.vatAmount); }
+      else r.nonTaxableTotal += Number(inv.subtotal);
+    }
+
+    const rows = Object.values(byRestaurant).sort((a, b) => b.grandTotal - a.grandTotal);
+    const totals = rows.reduce((acc, r) => ({
+      cashTotal: acc.cashTotal + r.cashTotal,
+      cardTotal: acc.cardTotal + r.cardTotal,
+      creditTotal: acc.creditTotal + r.creditTotal,
+      taxableNet: acc.taxableNet + r.taxableNet,
+      inputVat: acc.inputVat + r.inputVat,
+      nonTaxableTotal: acc.nonTaxableTotal + r.nonTaxableTotal,
+      grandTotal: acc.grandTotal + r.grandTotal,
+      invoiceCount: acc.invoiceCount + r.invoiceCount,
+    }), { cashTotal: 0, cardTotal: 0, creditTotal: 0, taxableNet: 0, inputVat: 0, nonTaxableTotal: 0, grandTotal: 0, invoiceCount: 0 });
+
+    sendSuccess(res, { byRestaurant: rows, totals });
+  } catch (err) { console.error(err); sendError(res, 'Failed to fetch summary', 500); }
+};
+
 export const deletePurchaseInvoice = async (req: AuthRequest, res: Response) => {
   try {
     const existing = await prisma.purchaseInvoice.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
@@ -205,7 +295,9 @@ export const getPurchaseLines = async (req: AuthRequest, res: Response) => {
           invoice: {
             select: {
               id: true, invoiceDate: true, invoiceNumber: true, invoiceType: true, paymentMethod: true,
+              restaurantId: true,
               supplier: { select: { nameAr: true, nameEn: true } },
+              restaurant: { select: { nameAr: true, nameEn: true } },
             },
           },
         },
