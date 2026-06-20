@@ -4,6 +4,7 @@ import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
 import PageHeader from '@/components/shared/PageHeader'
 import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
+import ExportButtons from '@/components/shared/ExportButtons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -31,6 +32,7 @@ export default function PricingPage() {
       <PageHeader
         title={lang === 'ar' ? 'محرك التسعير' : 'Pricing Engine'}
         subtitle={lang === 'ar' ? 'احسب السعر المناسب بناءً على تكلفة الطعام وهامش الربح المستهدف' : 'Calculate optimal prices based on food cost and target margin'}
+        actions={result ? <ExportButtons data={[result as unknown as Record<string, unknown>]} filename="pricing-result" /> : undefined}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

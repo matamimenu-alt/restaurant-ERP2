@@ -5,6 +5,7 @@ import { useLang } from '@/hooks/useLang'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import EmptyState from '@/components/shared/EmptyState'
 import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
+import ExportButtons from '@/components/shared/ExportButtons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Pencil, Trash2, Download, FileSpreadsheet, BarChart3, Calendar, Settings } from 'lucide-react'
+import { Plus, Pencil, Trash2, BarChart3, Calendar, Settings } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, Controller } from 'react-hook-form'
 
@@ -190,14 +191,9 @@ export default function RevenuePage() {
         <div className="flex gap-2 flex-wrap items-center">
           <input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <Button variant="outline" size="sm" className="gap-2 text-green-700 border-green-300 hover:bg-green-50">
-            <Download className="h-4 w-4" />{lang === 'ar' ? 'تصدير' : 'Export'}
-          </Button>
+          <ExportButtons data={records as unknown as Record<string, unknown>[]} filename="daily-sales" />
           <Button onClick={openAdd} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة سجل يومي' : 'Add Daily Record'}
-          </Button>
-          <Button variant="outline" size="sm">
-            <FileSpreadsheet className="h-4 w-4" />
           </Button>
         </div>
       </div>

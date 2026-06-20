@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, Receipt, Info, FileSpreadsheet, Printer } from 'lucide-react'
+import ExportButtons from '@/components/shared/ExportButtons'
+import { Plus, Trash2, Receipt, Info } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, useFieldArray, Controller } from 'react-hook-form'
 
@@ -147,14 +148,9 @@ export default function PurchasesPage() {
           <p className="text-sm text-gray-500 mt-0.5">{lang === 'ar' ? 'تتبع جميع سجلات الشراء والمصروفات مع ضريبة القيمة المضافة.' : 'Track all purchasing and expense records with VAT.'}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="gap-2 text-green-700 border-green-300 hover:bg-green-50">
-            <FileSpreadsheet className="h-4 w-4" />{lang === 'ar' ? 'تصدير Excel' : 'Export Excel'}
-          </Button>
+          <ExportButtons data={lines as unknown as Record<string, unknown>[]} filename="purchases" />
           <Button onClick={() => { reset(); setOpen(true) }} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة فاتورة' : 'Add Invoice'}
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2">
-            <Printer className="h-4 w-4" />
           </Button>
         </div>
       </div>

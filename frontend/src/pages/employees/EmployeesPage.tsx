@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Plus, Pencil, Trash2, Users, AlertTriangle, Upload, Download, CheckCircle, AlertCircle, FileSpreadsheet, Printer } from 'lucide-react'
+import ExportButtons from '@/components/shared/ExportButtons'
+import { Plus, Pencil, Trash2, Users, AlertTriangle, Upload, CheckCircle, AlertCircle } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
 import { useForm, Controller } from 'react-hook-form'
 
@@ -122,15 +123,9 @@ export default function EmployeesPage() {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="gap-2 text-green-700 border-green-300 hover:bg-green-50"
-            onClick={() => api.get('/api/v1/import/templates/employee', { responseType: 'blob' }).then(r => { const url = URL.createObjectURL(r.data); const a = document.createElement('a'); a.href = url; a.download = 'employee_template.xlsx'; a.click() })}>
-            <FileSpreadsheet className="h-4 w-4" />{lang === 'ar' ? 'تصدير Excel' : 'Export Excel'}
-          </Button>
+          <ExportButtons data={employees as unknown as Record<string, unknown>[]} filename="employees" />
           <Button onClick={openAdd} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة موظف' : 'Add Employee'}
-          </Button>
-          <Button variant="outline" size="sm">
-            <Printer className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={importMutation.isPending} className="gap-2">
             <Upload className="h-4 w-4" />{lang === 'ar' ? 'استيراد' : 'Import'}
