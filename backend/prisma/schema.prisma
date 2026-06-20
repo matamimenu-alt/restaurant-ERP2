@@ -35,17 +35,6 @@ enum PaymentMethod {
   CREDIT
 }
 
-enum PurchaseStatus {
-  DRAFT
-  POSTED
-  CANCELLED
-}
-
-enum ReturnType {
-  FULL
-  PARTIAL
-}
-
 enum StockMovementType {
   IN
   OUT
@@ -116,8 +105,6 @@ model Company {
   inventoryCategories InventoryCategory[]
   revenueEntries  RevenueEntry[]
   dailySalesRecords DailySalesRecord[]
-  purchaseInvoices PurchaseInvoice[]
-  purchaseReturns PurchaseReturn[]
   expenses        Expense[]
   expenseCategories ExpenseCategory[]
   employees       Employee[]
@@ -196,7 +183,6 @@ model Restaurant {
   branches        Branch[]
   revenueEntries  RevenueEntry[]
   dailySalesRecords DailySalesRecord[]
-  purchaseInvoices PurchaseInvoice[]
   expenses        Expense[]
   employees       Employee[]
   payrollRuns     PayrollRun[]
@@ -223,7 +209,6 @@ model Branch {
   manager          User?             @relation("BranchManager", fields: [managerId], references: [id])
   revenueEntries    RevenueEntry[]
   dailySalesRecords DailySalesRecord[]
-  purchaseInvoices  PurchaseInvoice[]
   expenses          Expense[]
   employees         Employee[]
   inventoryLocations InventoryLocation[]
@@ -251,7 +236,6 @@ model Supplier {
   updatedAt    DateTime @updatedAt
 
   company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  purchaseInvoices PurchaseInvoice[]
 
   @@map("suppliers")
 }
@@ -293,8 +277,6 @@ model InventoryItem {
   category           InventoryCategory?  @relation(fields: [categoryId], references: [id])
   locations          InventoryLocation[]
   stockMovements     StockMovement[]
-  purchaseLines      PurchaseInvoiceLine[]
-  returnLines        PurchaseReturnLine[]
   recipeLines        RecipeLine[]
   physicalCountLines PhysicalCountLine[]
 
@@ -426,91 +408,6 @@ model DailySalesRecord {
   branch     Branch?    @relation(fields: [branchId], references: [id])
 
   @@map("daily_sales_records")
-}
-
-// ─── PURCHASING ───────────────────────────────────────────────────────────────
-
-model PurchaseInvoice {
-  id            String         @id @default(cuid())
-  companyId     String
-  supplierId    String
-  restaurantId  String
-  branchId      String?
-  invoiceNumber String
-  invoiceDate   DateTime
-  subtotal      Decimal        @db.Decimal(15, 2)
-  vatAmount     Decimal        @db.Decimal(15, 2)
-  total         Decimal        @db.Decimal(15, 2)
-  invoiceType   String         @default("TAX")
-  paymentMethod PaymentMethod  @default(CASH)
-  status        PurchaseStatus @default(POSTED)
-  notes         String?
-  createdBy     String
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  company    Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  supplier   Supplier              @relation(fields: [supplierId], references: [id])
-  restaurant Restaurant            @relation(fields: [restaurantId], references: [id])
-  branch     Branch?               @relation(fields: [branchId], references: [id])
-  lines      PurchaseInvoiceLine[]
-  returns    PurchaseReturn[]
-
-  @@map("purchase_invoices")
-}
-
-model PurchaseInvoiceLine {
-  id        String  @id @default(cuid())
-  invoiceId String
-  itemId    String
-  quantity  Decimal @db.Decimal(15, 3)
-  unitPrice Decimal @db.Decimal(15, 2)
-  vatRate   Decimal @default(15) @db.Decimal(5, 2)
-  vatAmount Decimal @db.Decimal(15, 2)
-  total     Decimal @db.Decimal(15, 2)
-
-  invoice     PurchaseInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  item        InventoryItem      @relation(fields: [itemId], references: [id])
-  returnLines PurchaseReturnLine[]
-
-  @@map("purchase_invoice_lines")
-}
-
-model PurchaseReturn {
-  id          String     @id @default(cuid())
-  companyId   String
-  invoiceId   String
-  returnDate  DateTime
-  reason      String?
-  returnType  ReturnType @default(PARTIAL)
-  subtotal    Decimal    @db.Decimal(15, 2)
-  vatAmount   Decimal    @db.Decimal(15, 2)
-  total       Decimal    @db.Decimal(15, 2)
-  status      String     @default("POSTED")
-  createdBy   String
-  createdAt   DateTime   @default(now())
-
-  company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoice PurchaseInvoice      @relation(fields: [invoiceId], references: [id])
-  lines   PurchaseReturnLine[]
-
-  @@map("purchase_returns")
-}
-
-model PurchaseReturnLine {
-  id            String  @id @default(cuid())
-  returnId      String
-  invoiceLineId String
-  itemId        String
-  quantity      Decimal @db.Decimal(15, 3)
-  unitPrice     Decimal @db.Decimal(15, 2)
-  total         Decimal @db.Decimal(15, 2)
-
-  return      PurchaseReturn      @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  invoiceLine PurchaseInvoiceLine @relation(fields: [invoiceLineId], references: [id])
-  item        InventoryItem       @relation(fields: [itemId], references: [id])
-
-  @@map("purchase_return_lines")
 }
 
 // ─── EXPENSES ─────────────────────────────────────────────────────────────────
