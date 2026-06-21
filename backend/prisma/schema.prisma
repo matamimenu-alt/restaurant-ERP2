@@ -116,8 +116,6 @@ model Company {
   inventoryCategories InventoryCategory[]
   revenueEntries  RevenueEntry[]
   dailySalesRecords DailySalesRecord[]
-  purchaseInvoices PurchaseInvoice[]
-  purchaseReturns PurchaseReturn[]
   expenses        Expense[]
   expenseCategories ExpenseCategory[]
   employees       Employee[]
@@ -131,6 +129,8 @@ model Company {
   stockMovements  StockMovement[]
   physicalCounts  PhysicalCount[]
   importHistory ImportHistory[]
+  purchaseInvoices PurchaseInvoice[]
+  purchaseReturns PurchaseReturn[]
 
   @@map("companies")
 }
