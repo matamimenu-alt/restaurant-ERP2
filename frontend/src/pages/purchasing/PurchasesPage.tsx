@@ -192,20 +192,20 @@ export default function PurchasesPage() {
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
 
-  const params = new URLSearchParams({ limit: '500' })
-  if (search) params.set('search', search)
-  if (selectedSupplier) params.set('supplierId', selectedSupplier)
-  if (selectedCategory) params.set('categoryId', selectedCategory)
-  if (selectedInvoiceType) params.set('invoiceType', selectedInvoiceType)
-  if (paymentFilter !== 'ALL') params.set('paymentMethod', paymentFilter === 'CARD' ? 'BANK' : paymentFilter)
-  if (from) params.set('from', from)
-  if (to) params.set('to', to)
-  // Explicit restaurant filter overrides the axios interceptor restaurantId
-  if (restaurantFilter) params.set('restaurantId', restaurantFilter)
+  const queryParams: Record<string, string> = { limit: '500' }
+  if (search) queryParams.search = search
+  if (selectedSupplier) queryParams.supplierId = selectedSupplier
+  if (selectedCategory) queryParams.categoryId = selectedCategory
+  if (selectedInvoiceType) queryParams.invoiceType = selectedInvoiceType
+  if (paymentFilter !== 'ALL') queryParams.paymentMethod = paymentFilter === 'CARD' ? 'BANK' : paymentFilter
+  if (from) queryParams.from = from
+  if (to) queryParams.to = to
+  // Pass restaurantId explicitly — interceptor will skip injection if already present in params
+  queryParams.restaurantId = restaurantFilter || ''
 
   const { data: linesData, isLoading } = useQuery({
     queryKey: ['purchase-lines', search, selectedSupplier, selectedCategory, selectedInvoiceType, paymentFilter, from, to, restaurantFilter],
-    queryFn: () => api.get(`/api/v1/purchases/lines?${params}`).then(r => r.data),
+    queryFn: () => api.get('/api/v1/purchases/lines', { params: queryParams }).then(r => r.data),
   })
 
   const summaryParams = new URLSearchParams()

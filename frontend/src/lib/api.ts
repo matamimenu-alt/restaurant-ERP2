@@ -13,13 +13,13 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
 
-  // Inject restaurantId from persisted store into all requests
+  // Inject restaurantId from persisted store into requests that don't already specify it.
   try {
     const stored = localStorage.getItem('restaurant-storage')
     if (stored) {
       const parsed = JSON.parse(stored)
       const restaurantId = parsed?.state?.selectedRestaurant?.id
-      if (restaurantId) {
+      if (restaurantId && !(config.params && 'restaurantId' in config.params)) {
         config.params = { restaurantId, ...config.params }
       }
     }
