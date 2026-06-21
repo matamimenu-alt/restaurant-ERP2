@@ -3,6 +3,7 @@ import { useState, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
+import { useRestaurantStore } from '@/store/restaurantStore'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import EmptyState from '@/components/shared/EmptyState'
 import CurrencyDisplay from '@/components/shared/CurrencyDisplay'
@@ -145,6 +146,8 @@ function ChannelInput({ label, icon, registerName, register }: { label: string; 
 
 export default function RevenuePage() {
   const { lang } = useLang()
+  const { selectedRestaurant } = useRestaurantStore()
+  const selectedRestaurantId = selectedRestaurant?.id ?? ''
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
@@ -168,7 +171,7 @@ export default function RevenuePage() {
   })()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['daily-sales', from, to],
+    queryKey: ['daily-sales', from, to, selectedRestaurantId],
     queryFn: () => api.get(`/api/v1/daily-sales?from=${from}&to=${to}&limit=200`).then(r => r.data),
   })
 

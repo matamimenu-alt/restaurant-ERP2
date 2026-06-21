@@ -54,6 +54,8 @@ export const updateRevenue = async (req: AuthRequest, res: Response) => {
 
 export const deleteRevenue = async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await prisma.revenueEntry.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Revenue entry not found', 404);
     await prisma.revenueEntry.delete({ where: { id: req.params.id } });
     sendSuccess(res, null, 'Revenue entry deleted');
   } catch { sendError(res, 'Failed to delete revenue entry', 500); }

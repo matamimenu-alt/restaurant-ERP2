@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useRef } from 'react'
 import api from '@/lib/api'
 import { useLang } from '@/hooks/useLang'
+import { useRestaurantStore } from '@/store/restaurantStore'
 import PageHeader from '@/components/shared/PageHeader'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import EmptyState from '@/components/shared/EmptyState'
@@ -23,6 +24,8 @@ import { useForm, Controller } from 'react-hook-form'
 
 export default function ExpensesPage() {
   const { lang } = useLang()
+  const { selectedRestaurant } = useRestaurantStore()
+  const selectedRestaurantId = selectedRestaurant?.id ?? ''
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
@@ -40,7 +43,7 @@ export default function ExpensesPage() {
   params.set('limit', '500')
 
   const { data, isLoading } = useQuery({
-    queryKey: ['expenses', from, to],
+    queryKey: ['expenses', from, to, selectedRestaurantId],
     queryFn: () => api.get(`/api/v1/expenses?${params}`).then(r => r.data),
   })
   const { data: categories } = useQuery({ queryKey: ['expense-categories'], queryFn: () => api.get('/api/v1/expenses/categories').then(r => r.data.data) })

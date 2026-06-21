@@ -50,6 +50,8 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
 
 export const deleteExpense = async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await prisma.expense.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    if (!existing) return sendError(res, 'Expense not found', 404);
     await prisma.expense.delete({ where: { id: req.params.id } });
     sendSuccess(res, null, 'Expense deleted');
   } catch { sendError(res, 'Failed to delete expense', 500); }
