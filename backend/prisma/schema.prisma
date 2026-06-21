@@ -460,17 +460,20 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceLine {
-  id        String  @id @default(cuid())
-  invoiceId String
-  itemId    String
-  quantity  Decimal @db.Decimal(15, 3)
-  unitPrice Decimal @db.Decimal(15, 2)
-  vatRate   Decimal @default(15) @db.Decimal(5, 2)
-  vatAmount Decimal @db.Decimal(15, 2)
-  total     Decimal @db.Decimal(15, 2)
+  id              String   @id @default(cuid())
+  invoiceId       String
+  itemId          String?
+  itemDescription String?
+  itemUnit        String?
+  itemCategory    String?
+  quantity        Decimal  @db.Decimal(15, 3)
+  unitPrice       Decimal  @db.Decimal(15, 2)
+  vatRate         Decimal  @default(15) @db.Decimal(5, 2)
+  vatAmount       Decimal  @db.Decimal(15, 2)
+  total           Decimal  @db.Decimal(15, 2)
 
-  invoice     PurchaseInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  item        InventoryItem      @relation(fields: [itemId], references: [id])
+  invoice     PurchaseInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item        InventoryItem?      @relation(fields: [itemId], references: [id])
   returnLines PurchaseReturnLine[]
 
   @@map("purchase_invoice_lines")

@@ -27,7 +27,11 @@ type PurchaseLine = {
   vatAmount: number
   vatRate: number
   total: number
-  item: { nameAr: string; nameEn: string; unit: string; category?: { nameAr: string; nameEn: string } }
+  itemId?: string
+  itemDescription?: string
+  itemUnit?: string
+  itemCategory?: string
+  item?: { nameAr: string; nameEn: string; unit: string; category?: { nameAr: string; nameEn: string } }
   invoice: {
     id: string
     invoiceDate: string
@@ -219,7 +223,7 @@ export default function PurchasesPage() {
   const { data: items } = useQuery({ queryKey: ['inventory-items'], queryFn: () => api.get('/api/v1/inventory/items?limit=500').then(r => r.data.data) })
 
   const { register, handleSubmit, control, watch, reset } = useForm<FormValues>({
-    defaultValues: { supplierId: '', restaurantId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().split('T')[0], paymentMethod: 'CASH', invoiceType: 'TAX', notes: '', lines: [{ itemId: '', quantity: 1, unitPrice: 0, vatRate: 15 }] }
+    defaultValues: { supplierId: '', restaurantId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().split('T')[0], paymentMethod: 'CASH', invoiceType: 'TAX', notes: '', lines: [{ lineType: 'inventory', itemId: '', itemDescription: '', itemUnit: '', itemCategory: '', quantity: 1, unitPrice: 0, vatRate: 15 }] }
   })
   const { fields, append, remove } = useFieldArray({ control, name: 'lines' })
   const watchLines = watch('lines')
@@ -237,13 +241,25 @@ export default function PurchasesPage() {
     } catch { /* ignore */ }
   }
 
+  const prepareLines = (lines: FormValues[]) => lines.map((l: FormValues) => {
+    if (l.lineType === 'free') {
+      return { itemDescription: l.itemDescription, itemUnit: l.itemUnit || 'وحدة', itemCategory: l.itemCategory || '', quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), vatRate: Number(l.vatRate) || 0 }
+    }
+    return { itemId: l.itemId, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), vatRate: Number(l.vatRate) }
+  })
+
   const createMutation = useMutation({
-    mutationFn: (d: FormValues) => editingInvoiceId
-      ? api.put(`/api/v1/purchases/invoices/${editingInvoiceId}`, { ...d, subtotal, vatAmount, total })
-      : api.post('/api/v1/purchases/invoices', { ...d, subtotal, vatAmount, total }),
+    mutationFn: (d: FormValues) => {
+      const payload = { ...d, lines: prepareLines(d.lines), subtotal, vatAmount, total }
+      return editingInvoiceId
+        ? api.put(`/api/v1/purchases/invoices/${editingInvoiceId}`, payload)
+        : api.post('/api/v1/purchases/invoices', payload)
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase-lines'] })
-      setOpen(false); reset(); setEditingInvoiceId(null)
+      setOpen(false)
+      reset({ supplierId: '', restaurantId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().split('T')[0], paymentMethod: 'CASH', invoiceType: 'TAX', notes: '', lines: [{ lineType: 'inventory', itemId: '', itemDescription: '', itemUnit: '', itemCategory: '', quantity: 1, unitPrice: 0, vatRate: 15 }] })
+      setEditingInvoiceId(null)
       toast({ title: lang === 'ar' ? 'تم الحفظ' : 'Saved', variant: 'success' })
     },
     onError: () => toast({ title: 'Error', variant: 'destructive' }),
@@ -310,8 +326,12 @@ export default function PurchasesPage() {
         invoiceType: inv.invoiceType,
         paymentMethod: inv.paymentMethod,
         notes: inv.notes || '',
-        lines: inv.lines.map((l: { itemId: string; quantity: number; unitPrice: number; vatRate: number }) => ({
-          itemId: l.itemId,
+        lines: inv.lines.map((l: { itemId?: string; itemDescription?: string; itemUnit?: string; itemCategory?: string; quantity: number; unitPrice: number; vatRate: number }) => ({
+          lineType: l.itemId ? 'inventory' : 'free',
+          itemId: l.itemId || '',
+          itemDescription: l.itemDescription || '',
+          itemUnit: l.itemUnit || '',
+          itemCategory: l.itemCategory || '',
           quantity: Number(l.quantity),
           unitPrice: Number(l.unitPrice),
           vatRate: Number(l.vatRate),
@@ -472,12 +492,12 @@ export default function PurchasesPage() {
               'المطعم': l.invoice.restaurant?.nameAr || '',
               'نوع الفاتورة': l.invoice.invoiceType === 'TAX' ? 'ضريبية' : 'بسيطة',
               'رقم الفاتورة': l.invoice.invoiceNumber,
-              'المنتج': l.item.nameAr,
-              'الفئة': l.item.category ? l.item.category.nameAr : '',
+              'المنتج': l.item?.nameAr || l.itemDescription || '',
+              'الفئة': l.item?.category?.nameAr || l.itemCategory || '',
               'المورد': l.invoice.supplier.nameAr,
               'طريقة الدفع': l.invoice.paymentMethod === 'CASH' ? 'نقد' : l.invoice.paymentMethod === 'BANK' ? 'بطاقة' : 'آجل',
               'الكمية': Number(l.quantity),
-              'الوحدة': l.item.unit,
+              'الوحدة': l.item?.unit || l.itemUnit || '',
               'سعر الوحدة': Number(l.unitPrice),
               'المبلغ الصافي': Number((Number(l.quantity) * Number(l.unitPrice)).toFixed(2)),
               'الضريبة': Number(l.vatAmount),
@@ -488,7 +508,7 @@ export default function PurchasesPage() {
           <Button variant="outline" onClick={() => { setImportRows([]); setImportStatus('idle'); setImportResults({ success: 0, errors: [] }); setImportOpen(true) }} className="gap-2 border-green-200 text-green-700 hover:bg-green-50">
             <Upload className="h-4 w-4" />{lang === 'ar' ? 'استيراد Excel' : 'Import Excel'}
           </Button>
-          <Button onClick={() => { setEditingInvoiceId(null); reset({ supplierId: '', restaurantId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().split('T')[0], paymentMethod: 'CASH', invoiceType: 'TAX', lines: [{ itemId: '', quantity: 1, unitPrice: 0, vatRate: 15 }] }); setOpen(true) }} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
+          <Button onClick={() => { setEditingInvoiceId(null); reset({ supplierId: '', restaurantId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().split('T')[0], paymentMethod: 'CASH', invoiceType: 'TAX', notes: '', lines: [{ lineType: 'inventory', itemId: '', itemDescription: '', itemUnit: '', itemCategory: '', quantity: 1, unitPrice: 0, vatRate: 15 }] }); setOpen(true) }} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
             <Plus className="h-4 w-4" />{lang === 'ar' ? 'إضافة فاتورة' : 'Add Invoice'}
           </Button>
         </div>
@@ -699,12 +719,19 @@ export default function PurchasesPage() {
                           </span>
                           {line.invoice.invoiceNumber && <div className="text-xs text-gray-400 mt-0.5 truncate max-w-[90px]">{line.invoice.invoiceNumber}</div>}
                         </TableCell>
-                        <TableCell><div className="text-sm font-medium">{lang === 'ar' ? line.item.nameAr : line.item.nameEn}</div></TableCell>
                         <TableCell>
-                          {line.item.category ? (
+                          <div className="text-sm font-medium">
+                            {line.item ? (lang === 'ar' ? line.item.nameAr : line.item.nameEn) : line.itemDescription || '—'}
+                          </div>
+                          {!line.item && <span className="text-xs text-orange-500 font-medium">✏️ {lang === 'ar' ? 'صنف حر' : 'Free'}</span>}
+                        </TableCell>
+                        <TableCell>
+                          {line.item?.category ? (
                             <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded-full font-medium">
                               {lang === 'ar' ? line.item.category.nameAr : line.item.category.nameEn}
                             </span>
+                          ) : line.itemCategory ? (
+                            <span className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full font-medium">{line.itemCategory}</span>
                           ) : '—'}
                         </TableCell>
                         <TableCell className="text-sm">{lang === 'ar' ? line.invoice.supplier.nameAr : line.invoice.supplier.nameEn}</TableCell>
@@ -1112,43 +1139,78 @@ export default function PurchasesPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-base font-semibold">{lang === 'ar' ? 'أصناف الفاتورة' : 'Invoice Lines'}</Label>
-                <Button type="button" variant="outline" size="sm" onClick={() => append({ itemId: '', quantity: 1, unitPrice: 0, vatRate: 15 })}>
+                <Button type="button" variant="outline" size="sm" onClick={() => append({ lineType: 'inventory', itemId: '', itemDescription: '', itemUnit: '', itemCategory: '', quantity: 1, unitPrice: 0, vatRate: 15 })}>
                   <Plus className="h-4 w-4 me-1" />{lang === 'ar' ? 'إضافة صنف' : 'Add Line'}
                 </Button>
               </div>
               <div className="space-y-2">
-                {fields.map((field, index) => (
-                  <div key={field.id} className="grid grid-cols-5 gap-2 items-end p-3 bg-gray-50 rounded-lg">
-                    <div className="space-y-1 col-span-2">
-                      <Label className="text-xs">{lang === 'ar' ? 'الصنف' : 'Item'}</Label>
-                      <Controller name={`lines.${index}.itemId`} control={control} render={({ field: f }) => (
-                        <Select value={f.value} onValueChange={v => { f.onChange(v); fetchPriceHistory(v) }}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={lang === 'ar' ? 'اختر صنف' : 'Select item'} /></SelectTrigger>
-                          <SelectContent>
-                            {Array.isArray(items) && items.map((i: { id: string; nameAr: string; nameEn: string; unit: string }) => (
-                              <SelectItem key={i.id} value={i.id}>{lang === 'ar' ? i.nameAr : i.nameEn} ({i.unit})</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                {fields.map((field, index) => {
+                  const lineType = watchLines[index]?.lineType ?? 'inventory'
+                  const isFreeText = lineType === 'free'
+                  return (
+                  <div key={field.id} className="p-3 bg-gray-50 rounded-lg space-y-2 border border-gray-200">
+                    {/* Type toggle */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 font-medium">{lang === 'ar' ? 'نوع الصنف:' : 'Item type:'}</span>
+                      <Controller name={`lines.${index}.lineType`} control={control} render={({ field: f }) => (
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => f.onChange('inventory')}
+                            className={`px-2 py-0.5 text-xs rounded font-medium transition-all ${!isFreeText ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600 hover:bg-gray-100'}`}>
+                            📦 {lang === 'ar' ? 'من المخزون' : 'Inventory'}
+                          </button>
+                          <button type="button" onClick={() => f.onChange('free')}
+                            className={`px-2 py-0.5 text-xs rounded font-medium transition-all ${isFreeText ? 'bg-orange-500 text-white' : 'bg-white border text-gray-600 hover:bg-gray-100'}`}>
+                            ✏️ {lang === 'ar' ? 'صنف حر' : 'Free Text'}
+                          </button>
+                        </div>
                       )} />
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive ms-auto" onClick={() => remove(index)}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">{lang === 'ar' ? 'الكمية' : 'Qty'}</Label>
-                      <Input type="number" step="0.001" className="h-8 text-xs" {...register(`lines.${index}.quantity`, { valueAsNumber: true })} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">{lang === 'ar' ? 'السعر' : 'Unit Price'}</Label>
-                      <Input type="number" step="0.01" className="h-8 text-xs" {...register(`lines.${index}.unitPrice`, { valueAsNumber: true })} />
-                    </div>
-                    <div className="flex items-end gap-1">
-                      <div className="flex-1 space-y-1">
-                        <Label className="text-xs">{lang === 'ar' ? 'الضريبة %' : 'VAT %'}</Label>
-                        <Input type="number" className="h-8 text-xs" defaultValue={15} {...register(`lines.${index}.vatRate`, { valueAsNumber: true })} />
+                    <div className="grid grid-cols-5 gap-2 items-end">
+                      {isFreeText ? (
+                        <div className="space-y-1 col-span-2">
+                          <Label className="text-xs">{lang === 'ar' ? 'اسم الصنف' : 'Item Name'} <span className="text-orange-500">*</span></Label>
+                          <Input className="h-8 text-xs" placeholder={lang === 'ar' ? 'مثال: إسطوانة غاز، خدمة صيانة...' : 'e.g. Gas cylinder, Cleaning...'} {...register(`lines.${index}.itemDescription`)} />
+                        </div>
+                      ) : (
+                        <div className="space-y-1 col-span-2">
+                          <Label className="text-xs">{lang === 'ar' ? 'الصنف' : 'Item'}</Label>
+                          <Controller name={`lines.${index}.itemId`} control={control} render={({ field: f }) => (
+                            <Select value={f.value} onValueChange={v => { f.onChange(v); fetchPriceHistory(v) }}>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={lang === 'ar' ? 'اختر صنف' : 'Select item'} /></SelectTrigger>
+                              <SelectContent>
+                                {Array.isArray(items) && items.map((i: { id: string; nameAr: string; nameEn: string; unit: string }) => (
+                                  <SelectItem key={i.id} value={i.id}>{lang === 'ar' ? i.nameAr : i.nameEn} ({i.unit})</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )} />
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <Label className="text-xs">{lang === 'ar' ? 'الكمية' : 'Qty'}</Label>
+                        <Input type="number" step="0.001" className="h-8 text-xs" {...register(`lines.${index}.quantity`, { valueAsNumber: true })} />
                       </div>
-                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => remove(index)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      <div className="space-y-1">
+                        <Label className="text-xs">{lang === 'ar' ? 'السعر' : 'Unit Price'}</Label>
+                        <Input type="number" step="0.01" className="h-8 text-xs" {...register(`lines.${index}.unitPrice`, { valueAsNumber: true })} />
+                      </div>
+                      <div className="flex items-end gap-1">
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-xs">{lang === 'ar' ? 'الضريبة %' : 'VAT %'}</Label>
+                          <Input type="number" className="h-8 text-xs" defaultValue={isFreeText ? 0 : 15} {...register(`lines.${index}.vatRate`, { valueAsNumber: true })} />
+                        </div>
+                        {isFreeText && (
+                          <div className="flex-1 space-y-1">
+                            <Label className="text-xs">{lang === 'ar' ? 'الوحدة' : 'Unit'}</Label>
+                            <Input className="h-8 text-xs" placeholder="kg/pcs..." {...register(`lines.${index}.itemUnit`)} />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
             {priceHistory && (

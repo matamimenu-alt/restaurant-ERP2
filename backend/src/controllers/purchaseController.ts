@@ -45,6 +45,36 @@ export const getPurchaseInvoice = async (req: AuthRequest, res: Response) => {
   } catch { sendError(res, 'Failed to fetch invoice', 500); }
 };
 
+type LineInput = {
+  itemId?: string;
+  itemDescription?: string;
+  itemUnit?: string;
+  itemCategory?: string;
+  quantity: number;
+  unitPrice: number;
+  vatRate?: number;
+  vatAmount?: number;
+  total?: number;
+};
+
+function buildLineData(l: LineInput) {
+  const vatRate = l.vatRate ?? (l.itemId ? 15 : 0);
+  const net = l.unitPrice * l.quantity;
+  const vatAmount = l.vatAmount !== undefined ? l.vatAmount : (net * vatRate) / 100;
+  const total = l.total !== undefined ? l.total : net + vatAmount;
+  return {
+    itemId: l.itemId || null,
+    itemDescription: l.itemDescription || null,
+    itemUnit: l.itemUnit || null,
+    itemCategory: l.itemCategory || null,
+    quantity: l.quantity,
+    unitPrice: l.unitPrice,
+    vatRate,
+    vatAmount,
+    total,
+  };
+}
+
 export const createPurchaseInvoice = async (req: AuthRequest, res: Response) => {
   try {
     const { lines, ...invoiceData } = req.body;
@@ -56,30 +86,20 @@ export const createPurchaseInvoice = async (req: AuthRequest, res: Response) => 
           companyId: req.user!.companyId,
           createdBy: req.user!.userId,
           invoiceDate: new Date(invoiceData.invoiceDate),
-          lines: {
-            create: lines.map((l: { itemId: string; quantity: number; unitPrice: number; vatRate?: number }) => {
-              const vatRate = l.vatRate ?? 15;
-              const vatAmount = (l.unitPrice * l.quantity * vatRate) / 100;
-              const total = l.unitPrice * l.quantity + vatAmount;
-              return { itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, vatRate, vatAmount, total };
-            }),
-          },
+          lines: { create: lines.map(buildLineData) },
         },
         include: { lines: true },
       });
 
-      // Update inventory & item prices
-      for (const line of lines) {
+      // Update inventory only for inventory-linked lines
+      for (const line of lines as LineInput[]) {
+        if (!line.itemId) continue;
         const branchId = invoiceData.branchId;
         if (branchId) {
           await tx.inventoryLocation.upsert({
             where: { branchId_itemId: { branchId, itemId: line.itemId } },
             create: { branchId, itemId: line.itemId, quantity: line.quantity, averageCost: line.unitPrice },
-            update: {
-              quantity: { increment: line.quantity },
-              averageCost: line.unitPrice,
-              lastUpdated: new Date(),
-            },
+            update: { quantity: { increment: line.quantity }, averageCost: line.unitPrice, lastUpdated: new Date() },
           });
           await tx.stockMovement.create({
             data: {
@@ -90,10 +110,7 @@ export const createPurchaseInvoice = async (req: AuthRequest, res: Response) => 
             },
           });
         }
-        await tx.inventoryItem.update({
-          where: { id: line.itemId },
-          data: { lastPurchasePrice: line.unitPrice },
-        });
+        await tx.inventoryItem.update({ where: { id: line.itemId }, data: { lastPurchasePrice: line.unitPrice } });
       }
       return inv;
     });
@@ -130,21 +147,11 @@ export const updatePurchaseInvoice = async (req: AuthRequest, res: Response) => 
       if (Array.isArray(lines)) {
         await tx.purchaseInvoiceLine.deleteMany({ where: { invoiceId: req.params.id } });
         await tx.purchaseInvoiceLine.createMany({
-          data: lines.map((l: { itemId: string; quantity: number; unitPrice: number; vatRate?: number; vatAmount: number; total: number }) => ({
-            invoiceId: req.params.id,
-            itemId: l.itemId,
-            quantity: l.quantity,
-            unitPrice: l.unitPrice,
-            vatRate: l.vatRate ?? 15,
-            vatAmount: l.vatAmount,
-            total: l.total,
-          })),
+          data: (lines as LineInput[]).map(l => ({ invoiceId: req.params.id, ...buildLineData(l) })),
         });
-        for (const l of lines as { itemId: string; unitPrice: number }[]) {
-          await tx.inventoryItem.update({
-            where: { id: l.itemId },
-            data: { lastPurchasePrice: l.unitPrice },
-          });
+        for (const l of lines as LineInput[]) {
+          if (!l.itemId) continue;
+          await tx.inventoryItem.update({ where: { id: l.itemId }, data: { lastPurchasePrice: l.unitPrice } });
         }
       }
 
@@ -352,14 +359,29 @@ export const getPurchaseLines = async (req: AuthRequest, res: Response) => {
     if (from || to) invoiceWhere.invoiceDate = { gte: from, lte: to ? new Date(new Date(to).setHours(23, 59, 59)) : undefined };
 
     const lineWhere: Prisma.PurchaseInvoiceLineWhereInput = { invoice: invoiceWhere };
-    if (req.query.categoryId) lineWhere.item = { categoryId: req.query.categoryId as string };
-    if (req.query.search) lineWhere.item = { ...lineWhere.item as object, OR: [{ nameAr: { contains: req.query.search as string } }, { nameEn: { contains: req.query.search as string, mode: 'insensitive' } }] };
+    if (req.query.categoryId) {
+      // categoryId applies to inventory items; free-text lines won't have a category match
+      lineWhere.OR = [
+        { item: { categoryId: req.query.categoryId as string } },
+        { itemCategory: req.query.categoryId as string },
+      ];
+    }
+    if (req.query.search) {
+      const s = req.query.search as string;
+      lineWhere.OR = [
+        ...(lineWhere.OR || []),
+        { item: { OR: [{ nameAr: { contains: s } }, { nameEn: { contains: s, mode: 'insensitive' } }] } },
+        { itemDescription: { contains: s, mode: 'insensitive' } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       prisma.purchaseInvoiceLine.findMany({
         where: lineWhere, skip, take: limit,
         orderBy: { invoice: { invoiceDate: 'desc' } },
-        include: {
+        select: {
+          id: true, quantity: true, unitPrice: true, vatRate: true, vatAmount: true, total: true,
+          itemId: true, itemDescription: true, itemUnit: true, itemCategory: true,
           item: { select: { nameAr: true, nameEn: true, unit: true, category: { select: { nameAr: true, nameEn: true } } } },
           invoice: {
             select: {
